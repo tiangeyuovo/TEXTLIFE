@@ -1,0 +1,2470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TEXTLIFE — emergent ecology</title>
+<style>
+/* ============================================================
+   :root — 全部颜色集中在此，方便调色
+   编码规则: 字形=物种 / 颜色=营养级 / 字号=能量 / 透明度=年龄
+   ============================================================ */
+:root{
+  --bg:#0a0a0c;
+  --bg-panel:#0d0d11;
+  --bg-raise:#121218;
+  --line:#1e1e27;
+  --line-soft:#16161d;
+  --fg:#c6c6d2;
+  --fg-mid:#8a8a9c;
+  --dim:#4d4d5e;
+  --dimmer:#2c2c38;
+
+  /* 营养级基色 */
+  --producer:#5fbf6a;
+  --herbivore:#d8c24e;
+  --predator:#d85f4a;
+  --decomposer:#a473d8;
+  --special:#4ec9d8;
+
+  /* 营养级色相（物种分化时在此附近偏移） */
+  --hue-producer:128;
+  --hue-herbivore:48;
+  --hue-predator:9;
+  --hue-decomposer:272;
+  --hue-special:186;
+
+  /* 事件颜色 */
+  --ev-spec:#4ec9d8;
+  --ev-ext:#d85f4a;
+  --ev-boom:#d8c24e;
+  --ev-crash:#d88a4a;
+  --ev-dom:#5fbf6a;
+  --ev-player:#9ab6e0;
+  --ev-info:#6a6a7d;
+  --ev-major:#e8e8f2;
+
+  --nutrient:#2f4a3a;
+
+  /* 网格度量（运行时由字符实测宽度覆盖） */
+  --cw:8.4px;
+  --ch:15px;
+  --fs:14px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  font-size:13px;
+  line-height:1.45;
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeSpeed;
+}
+::selection{background:#2a3a4a;color:#fff}
+
+/* 滚动条 */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:0}
+::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+
+/* ============================================================
+   布局
+   ============================================================ */
+#app{
+  display:flex;flex-direction:column;
+  height:100%;width:100%;
+  background:var(--bg);
+}
+
+/* --- 顶部状态栏 --- */
+#statusbar{
+  flex:0 0 auto;
+  display:flex;align-items:center;gap:14px;
+  padding:5px 10px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg-panel);
+  font-size:11px;
+  white-space:nowrap;
+  overflow-x:auto;
+  scrollbar-width:none;
+}
+#statusbar::-webkit-scrollbar{display:none}
+.sb-item{display:flex;align-items:center;gap:5px;color:var(--dim)}
+.sb-item b{color:var(--fg);font-weight:400}
+.sb-key{color:var(--dimmer);text-transform:uppercase;letter-spacing:.06em}
+#runname{color:var(--special);letter-spacing:.04em}
+.law{
+  color:var(--ev-boom);border:1px solid #3a3420;
+  padding:0 5px;border-radius:2px;background:#17150c;
+  cursor:help;
+}
+.gauge{display:inline-block;width:52px;color:var(--dimmer);letter-spacing:-.5px}
+.gauge i{font-style:normal}
+
+/* --- 中部 --- */
+#main{flex:1 1 auto;display:flex;min-height:0;overflow:hidden}
+
+#worldpane{
+  flex:1 1 auto;min-width:0;
+  position:relative;
+  overflow:auto;
+  background:var(--bg);
+  display:flex;align-items:flex-start;justify-content:center;
+  padding:8px;
+}
+#gridwrap{position:relative}
+#grid{
+  font-size:var(--fs);
+  line-height:var(--ch);
+  letter-spacing:0;
+  white-space:pre;
+  color:var(--dim);
+  cursor:crosshair;
+  user-select:none;
+  font-variant-ligatures:none;
+  font-feature-settings:"liga" 0,"calt" 0;
+}
+/* 每个生物一个 inline-block，固定格宽以免字号变化破坏网格对齐 */
+#grid i{
+  display:inline-block;
+  width:var(--cw);height:var(--ch);
+  line-height:var(--ch);
+  text-align:center;vertical-align:top;
+  font-style:normal;overflow:hidden;
+}
+#grid u{text-decoration:none;color:var(--nutrient)}
+/* 能量 → 字号 */
+.e0{font-size:.72em}.e1{font-size:.86em}.e2{font-size:1em}.e3{font-size:1.16em}.e4{font-size:1.36em}
+/* 年龄 → 透明度 */
+.g0{opacity:.5}.g1{opacity:1}.g2{opacity:.6}
+/* 养分背景四级 */
+.n0{color:#15181600}.n1{color:#1d2a20}.n2{color:#27402d}.n3{color:#34573b}
+/* 腐殖质（尸体）用分解者色系，与养分的绿色区分 */
+.d1{color:#2a2036}.d2{color:#3b2b4e}.d3{color:#513a69}
+
+#cursor{
+  position:absolute;pointer-events:none;
+  outline:1px solid rgba(200,200,220,.5);
+  width:var(--cw);height:var(--ch);
+  display:none;
+}
+
+/* --- 右侧栏 --- */
+#side{
+  flex:0 0 250px;
+  display:flex;flex-direction:column;
+  border-left:1px solid var(--line);
+  background:var(--bg-panel);
+  min-height:0;
+}
+.panel{display:flex;flex-direction:column;min-height:0}
+.panel-head{
+  flex:0 0 auto;
+  padding:4px 9px;
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--dim);
+  border-bottom:1px solid var(--line-soft);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.panel-head span{color:var(--dimmer);letter-spacing:0;text-transform:none}
+.panel-body{flex:1 1 auto;overflow-y:auto;padding:5px 8px;min-height:0}
+
+#specieslist{flex:1 1 auto}
+.sp{
+  display:flex;align-items:baseline;gap:6px;
+  padding:1px 2px;cursor:pointer;border-radius:2px;
+  line-height:1.5;
+}
+.sp:hover{background:var(--bg-raise)}
+.sp.dead{opacity:.35}
+.sp-g{display:inline-block;width:16px;text-align:center;flex:0 0 auto}
+.sp-n{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg-mid);font-size:11px}
+.sp-c{flex:0 0 auto;color:var(--dim);font-size:10px;font-variant-numeric:tabular-nums}
+.sp-bar{flex:0 0 34px;color:var(--dimmer);font-size:10px;letter-spacing:-1px;overflow:hidden;white-space:nowrap}
+
+#chartpanel{flex:0 0 auto;border-top:1px solid var(--line)}
+.chart{
+  font-size:12px;line-height:1.15;letter-spacing:0;
+  white-space:pre;overflow:hidden;
+  padding:2px 0 4px;
+}
+.chart .cl-bio{color:var(--producer)}
+.chart .cl-herb{color:var(--herbivore)}
+.chart .cl-pred{color:var(--predator)}
+.chart-legend{display:flex;gap:9px;font-size:10px;color:var(--dim);padding-top:2px}
+.chart-legend b{font-weight:400}
+
+/* --- Chronicle --- */
+#chroniclepane{
+  flex:0 0 168px;
+  display:flex;flex-direction:column;
+  border-top:1px solid var(--line);
+  background:var(--bg-panel);
+  min-height:0;
+}
+#chronicle{
+  flex:1 1 auto;overflow-y:auto;
+  padding:4px 10px 8px;
+  font-size:11.5px;line-height:1.5;
+}
+.ce{display:flex;gap:8px;padding:.5px 0;animation:fadein .35s ease}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.ce-t{flex:0 0 auto;color:var(--dimmer);font-variant-numeric:tabular-nums}
+.ce-b{flex:1 1 auto;color:var(--fg-mid)}
+.ce.k-spec .ce-b{color:var(--ev-spec)}
+.ce.k-ext  .ce-b{color:var(--ev-ext)}
+.ce.k-boom .ce-b{color:var(--ev-boom)}
+.ce.k-crash .ce-b{color:var(--ev-crash)}
+.ce.k-dom  .ce-b{color:var(--ev-dom)}
+.ce.k-player .ce-b{color:var(--ev-player)}
+.ce.k-major .ce-b{color:var(--ev-major);font-weight:600}
+.ce.k-info .ce-b{color:var(--ev-info)}
+.ce.k-spec .ce-t,.ce.k-major .ce-t{color:var(--dim)}
+
+/* --- 底部工具栏 --- */
+#toolbar{
+  flex:0 0 auto;
+  display:flex;align-items:center;gap:6px;
+  padding:6px 9px;
+  border-top:1px solid var(--line);
+  background:var(--bg-raise);
+  flex-wrap:wrap;
+}
+.btn{
+  background:transparent;border:1px solid var(--line);
+  color:var(--fg-mid);
+  font:inherit;font-size:11px;letter-spacing:.06em;
+  padding:3px 8px;cursor:pointer;border-radius:2px;
+  transition:background .1s,border-color .1s,color .1s;
+}
+.btn:hover:not(:disabled){border-color:var(--dim);color:var(--fg);background:var(--bg-panel)}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.on{border-color:var(--special);color:var(--special);background:#0d1a1d}
+.btn .cost{color:var(--dimmer);font-size:9px;margin-left:3px}
+.btn.on .cost{color:var(--special)}
+.tb-sp{flex:1 1 auto}
+.tb-stat{color:var(--dim);font-size:11px;display:flex;align-items:center;gap:5px}
+.tb-stat b{color:var(--fg);font-weight:400;font-variant-numeric:tabular-nums}
+#influence{letter-spacing:1px;color:var(--special)}
+#influence .off{color:var(--dimmer)}
+.speed .btn{padding:3px 6px}
+
+/* --- 提示框 --- */
+#tip{
+  position:fixed;z-index:40;pointer-events:none;
+  background:#07070a;border:1px solid var(--line);
+  padding:5px 8px;font-size:11px;line-height:1.5;
+  max-width:250px;display:none;
+  box-shadow:0 4px 18px rgba(0,0,0,.6);
+}
+#tip .t-h{display:flex;gap:6px;align-items:baseline;margin-bottom:2px}
+#tip .t-r{color:var(--dim);display:flex;justify-content:space-between;gap:10px}
+#tip .t-r b{color:var(--fg-mid);font-weight:400}
+
+/* --- 遮罩 / 模态 --- */
+#overlay{
+  position:fixed;inset:0;z-index:60;
+  background:rgba(6,6,9,.86);
+  display:none;align-items:center;justify-content:center;
+  padding:16px;overflow-y:auto;
+}
+#overlay.show{display:flex}
+.modal{
+  background:var(--bg-panel);border:1px solid var(--line);
+  max-width:640px;width:100%;max-height:88vh;
+  display:flex;flex-direction:column;
+  box-shadow:0 10px 60px rgba(0,0,0,.7);
+}
+.modal-head{
+  padding:9px 14px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-mid);
+}
+.modal-body{padding:12px 14px;overflow-y:auto;font-size:12px;line-height:1.6}
+.modal-foot{padding:9px 14px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+.x{cursor:pointer;color:var(--dim);font-size:13px;padding:0 3px}
+.x:hover{color:var(--fg)}
+.rule{border-top:1px solid var(--line-soft);margin:10px 0}
+.kv{display:flex;justify-content:space-between;gap:14px;color:var(--dim);padding:1px 0}
+.kv b{color:var(--fg-mid);font-weight:400}
+.big{font-size:20px;color:var(--fg);letter-spacing:.02em}
+.muted{color:var(--dim)}
+.hl{color:var(--special)}
+.warn{color:var(--ev-crash)}
+
+/* 进度 */
+#boot{
+  position:fixed;inset:0;z-index:80;background:var(--bg);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  font-size:12px;color:var(--fg-mid);
+}
+#boot.show{display:flex}
+#bootbar{color:var(--producer);letter-spacing:0;white-space:pre;font-size:13px}
+#boottext{color:var(--dim);font-size:11px}
+
+/* Codex 网格 */
+.cx{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:6px;
+}
+.cx-e{
+  border:1px solid var(--line-soft);padding:6px 8px;background:var(--bg);
+  cursor:pointer;transition:border-color .1s;
+}
+.cx-e:hover{border-color:var(--dim)}
+.cx-e.sel{border-color:var(--special);background:#0c1417}
+.cx-h{display:flex;gap:7px;align-items:baseline}
+.cx-g{font-size:16px;width:16px;text-align:center}
+.cx-n{color:var(--fg);font-size:11.5px}
+.cx-d{color:var(--dim);font-size:10.5px;line-height:1.45;margin-top:3px}
+.cx-m{color:var(--dimmer);font-size:10px;margin-top:3px;display:flex;justify-content:space-between}
+
+/* 移动端标签 */
+#tabs{display:none;flex:0 0 auto;border-bottom:1px solid var(--line);background:var(--bg-panel)}
+#tabs button{
+  flex:1;background:transparent;border:0;border-bottom:2px solid transparent;
+  color:var(--dim);font:inherit;font-size:10.5px;letter-spacing:.1em;
+  padding:7px 0;cursor:pointer;text-transform:uppercase;
+}
+#tabs button.on{color:var(--fg);border-bottom-color:var(--special)}
+
+@media (max-width:820px){
+  #tabs{display:flex}
+  #main{flex-direction:column}
+  #side{flex:1 1 auto;border-left:0;border-top:1px solid var(--line);width:100%}
+  #chroniclepane{flex:1 1 auto;border-top:1px solid var(--line)}
+  body.tab-world #side,body.tab-world #chroniclepane{display:none}
+  body.tab-data #worldpane,body.tab-data #chroniclepane{display:none}
+  body.tab-log #worldpane,body.tab-log #side{display:none}
+  #worldpane{padding:4px;justify-content:flex-start}
+  #toolbar{gap:4px;padding:5px}
+  .btn{padding:4px 7px}
+  .tb-sp{flex-basis:100%;height:0}
+}
+</style>
+</head>
+<body class="tab-world">
+
+<div id="app">
+  <header id="statusbar">
+    <div class="sb-item"><span id="runname">—</span></div>
+    <div class="sb-item"><span class="sb-key">temp</span><span class="gauge" id="g-temp"></span><b id="v-temp">—</b></div>
+    <div class="sb-item"><span class="sb-key">light</span><span class="gauge" id="g-light"></span><b id="v-light">—</b></div>
+    <div class="sb-item"><span class="sb-key">energy</span><b id="v-energy">—</b></div>
+    <div class="sb-item" id="laws"></div>
+    <div class="tb-sp"></div>
+    <div class="sb-item"><button class="btn" id="b-codex">CODEX</button><button class="btn" id="b-archive">ARCHIVE</button></div>
+  </header>
+
+  <nav id="tabs">
+    <button data-tab="world" class="on">World</button>
+    <button data-tab="data">Species</button>
+    <button data-tab="log">Chronicle</button>
+  </nav>
+
+  <div id="main">
+    <section id="worldpane">
+      <div id="gridwrap">
+        <pre id="grid"></pre>
+        <div id="cursor"></div>
+      </div>
+    </section>
+    <aside id="side">
+      <div class="panel" id="speciespanel" style="flex:1 1 auto">
+        <div class="panel-head">Species <span id="sp-count"></span></div>
+        <div class="panel-body" id="specieslist"></div>
+      </div>
+      <div class="panel" id="chartpanel">
+        <div class="panel-head">Biomass <span id="chart-max"></span></div>
+        <div class="panel-body" style="overflow:hidden;padding:4px 8px 6px">
+          <div class="chart" id="chart"></div>
+          <div class="chart-legend">
+            <b class="cl-bio">▇ producer</b><b class="cl-herb">▇ herbivore</b><b class="cl-pred">▇ predator</b>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <section id="chroniclepane">
+    <div class="panel-head">Chronicle <span id="ch-hint">field log</span></div>
+    <div id="chronicle"></div>
+  </section>
+
+  <footer id="toolbar">
+    <button class="btn" data-tool="SEED">SEED<span class="cost">2</span></button>
+    <button class="btn" data-tool="NUTRIENT">NUTRIENT<span class="cost">1</span></button>
+    <button class="btn" data-tool="WARM">WARM<span class="cost">2</span></button>
+    <button class="btn" data-tool="COOL">COOL<span class="cost">2</span></button>
+    <button class="btn" data-tool="CULL">CULL<span class="cost">3</span></button>
+    <button class="btn" data-tool="IRRADIATE">IRRADIATE<span class="cost">4</span></button>
+    <button class="btn" data-tool="PRESERVE">PRESERVE<span class="cost">5</span></button>
+    <div class="tb-sp"></div>
+    <div class="tb-stat">influence <span id="influence"></span><span id="inf-next" class="muted"></span></div>
+    <div class="tb-stat">tick <b id="v-tick">0</b></div>
+    <div class="tb-stat">pop <b id="v-pop">0</b></div>
+    <div class="tb-stat speed">
+      <button class="btn" data-speed="0">⏸</button>
+      <button class="btn on" data-speed="1">1×</button>
+      <button class="btn" data-speed="2">2×</button>
+      <button class="btn" data-speed="4">4×</button>
+    </div>
+  </footer>
+</div>
+
+<div id="tip"></div>
+<div id="overlay"><div class="modal" id="modal"></div></div>
+<div id="boot">
+  <div style="letter-spacing:.3em;color:var(--fg)">TEXTLIFE</div>
+  <div id="bootbar"></div>
+  <div id="boottext">initialising</div>
+</div>
+
+<script>
+/*<<<CORE_START>>>*/
+/* ============================================================================
+   TEXTLIFE — 模拟内核 (无 DOM 依赖，可在 node 中直接跑，用于调参验证)
+   模块: CONFIG / RNG / NAMES / SPECIES / WORLD / SIM / EVENTS
+   ========================================================================== */
+(function(root){
+'use strict';
+
+/* ============================== CONFIG ==============================
+   调参笔记 —— 以下每一条都是在 node 里跑了数千 tick 反复验证后定下来的。
+   记录"为什么是这个值"，因为大多数参数一旦偏离就会让生态在 500 tick 内塌掉。
+
+   [能量收支] 系统唯一的能量输入是 INSOLATION，唯一的输出是代谢热与捕食热损失。
+     死亡不销毁能量（尸体 → detritus → nutrient），所以总能量严格守恒，
+     可用 tools/energy.js 验证 drift ≈ 0。这是真实种群震荡的前提。
+
+   [压垮生态的五个坑，以及对应的机制]
+     1 库存 vs 通量 : 养分库存过大 → 生产者无视通量铺满全场、震荡消失。
+                      故 NUTRIENT_CAP 与 INSOLATION 都压得很低，让系统受通量限制。
+     2 功能反应     : 没有 digest（消化时间）则捕食速率无上限 → 尖峰崩溃而非极限环。
+     3 空间锁死     : 生产者铺满后所有移动生物都找不到空格产子，繁殖系统整体锁死。
+                      → CROWD_LIMIT + SHADE 保证网格永远留有空隙；
+                        同时 moveOrg 允许移动生物与固着生产者交换位置。
+     4 世代时间序   : 消费者必须显著慢于其食物，否则任何扰动都被放大成"吃光→饿死"。
+                      实测世代时间: 生产者 ~30t < 食草者 ~120t < 捕食者 ~250t。
+     5 避难所       : 小网格上真正致命的是随机灭绝。故给了两层避难所 ——
+                      GRAZE_MIN（幼苗太小不值得啃，保证生产者永不被啃到 0）
+                      COVER_MAX（猎物藏进密集植被，把捕食压力与植被密度平滑耦合）。
+   ================================================================== */
+var CONFIG = {
+  W: 72, H: 32,
+  TICK_RATE: 14,               // 每秒逻辑 tick（1× 速度）
+  RENDER_FPS: 15,
+
+  /* 养分库存必须"小而快"：库存大 = 生产者可以无视通量爆满全场，震荡消失。
+     CAP 低 + INSOLATION 低 → 系统由通量(flux)而非库存(stock)限制，这是震荡的前提。*/
+  NUTRIENT_CAP: 34,
+  INSOLATION: 0.12,            // 能量输入；乘以格数即整个生态的吞吐上限 (~110/tick)
+  DIFFUSION: 0.085,            // 每 4 tick 的四邻域混合系数；生产者会挖空自己脚下的
+                               // 养分，靠扩散补给 → 形成斑块而非均匀铺满
+  DIFFUSE_EVERY: 4,
+  RECYCLE: 1.0,
+  PREDATION_EFF: 0.70,
+  /* 腐殖质(detritus)是分解者的专属资源：尸体只进入 detritus，生产者吃不到。
+     没有专属资源时，根区吸收的生产者会把底物一路吸干，分解者必然饿死。
+     无生物参与时 detritus 只以 DETRITUS_DECAY 缓慢自然矿化 —— 于是分解者
+     真正承担"加速养分回归"的生态职能，而不只是装饰。 */
+  DETRITUS_DECAY: 0.004,       // 每 tick 自然矿化为 nutrient 的比例（无分解者时的兜底回收）
+  DECOMP_TAKE: 0.35,           // 分解者每 tick 可从一格取走的 detritus 比例
+  DECOMP_LEAK: 0.55,           // 取食时同时矿化回 nutrient 的比例 = 分解者的"生态服务"
+  /* 自遮荫 / 密度制约：邻域被占超过此数的生产者不再繁殖。
+     没有它生产者会铺满 2304 格，于是所有移动生物都找不到空格产子，
+     整个网格连同繁殖系统一起锁死。这条同时保证了永远存在可通行的空隙。 */
+  CROWD_LIMIT: 3,
+  SHADE: 0.10,                 // 每个相邻个体削减的固碳比例（光竞争）
+  SPORE_P: 0.28,               // 生产者子代远播的概率
+  SPORE_R: 8,                  // 远播半径：越小 → 斑块越局域 → 各区域越可能异步振荡
+  ROOT_SHARE: 0.22,            // 生产者每 tick 可从单个邻格汲取的养分比例（根区半径 1）。
+                               // 单格日照供给低于生产者代谢，只吃本格必然入不敷出
+  /* 植被隐蔽：猎物被发现的概率随邻域生产者数平滑下降（见 actMobile 的平方律）。
+     COVER_MAX = 植被最密时的最大隐蔽概率。
+     这是把三个营养级真正耦合起来的负反馈：
+       食草者暴涨 → 啃光植被 → 掩体消失 → 被捕食率飙升 → 食草者回落 → 植被恢复。
+     没有它，捕食者要么找不到猎物而饿死，要么斩尽杀绝，中间几乎没有稳定窗口。 */
+  COVER_MAX: 0.92,
+  GRAZE_MIN: 16,               // 低于此能量的生产者被视为幼苗，食草者不会取食
+
+  SPECIATION_DIST: 0.50,       // 分化阈值：太低会物种爆炸，太高则永远看不到分化
+  SPECIATION_MIN_TICK: 400,    // run 开始后多少 tick 才允许分化
+  SPECIATION_COOLDOWN: 900,    // 全局分化冷却，避免一次爆发出十几个种
+  MAX_SPECIES: 22,             // 同时存活的物种上限
+  MUT_STEP_MIN: 0.05,
+  MUT_STEP_MAX: 0.15,
+
+  /* 起始必须是正金字塔。捕食者相对食草者过多会在 150 tick 内清空猎物，
+     随后自己饿死，剩下生产者铺成绿毯 —— 这是最容易踩中的失败模式。 */
+  START_POP: { producer: 500, herbivore: 60, predator: 10, decomposer: 30 },
+
+  HIST_EVERY: 20,              // 每 N tick 采样一次种群历史
+  HIST_LEN: 240,               // 历史环形缓冲长度 (= 4800 tick)
+  CHRONICLE_MAX: 420,
+
+  OFFLINE_TICKS_PER_SEC: 1,   // 1 真实秒 = 1 tick。8h 上限 → 28800 tick，
+                              // 以 ~1300 tick/s 补算约 22 秒，配进度条可以接受
+  OFFLINE_CAP_HOURS: 8,
+
+  INFLUENCE_MAX: 10,
+  INFLUENCE_PERIOD_MS: 6 * 60 * 1000,   // 每 6 分钟 +1
+  COSTS: { SEED:2, NUTRIENT:1, WARM:2, COOL:2, CULL:3, IRRADIATE:4, PRESERVE:5 },
+
+  RUN_TICK_LIMIT: 400000
+};
+
+/* ============================== RNG ==============================
+   mulberry32 —— 可序列化的确定性随机数，保证 run seed 可复现
+   ================================================================ */
+function makeRng(seed){
+  var s = seed >>> 0;
+  function r(){
+    s = (s + 0x6D2B79F5) >>> 0;
+    var t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  r.int = function(n){ return (r() * n) | 0; };
+  r.range = function(a,b){ return a + r() * (b - a); };
+  r.pick = function(a){ return a[(r() * a.length) | 0]; };
+  r.chance = function(p){ return r() < p; };
+  r.state = function(){ return s; };
+  r.setState = function(v){ s = v >>> 0; };
+  return r;
+}
+
+/* ============================== NAMES ============================== */
+var ADJ = ['Pale','Ashen','Drift','Verdant','Hollow','Umber','Slate','Cinder','Silt','Frost',
+  'Tidal','Rust','Dusk','Bright','Coiled','Thin','Vast','Mottled','Glass','Iron','Salt','Wan',
+  'Deep','Quiet','Brittle','Amber','Sallow','Grey','Bitter','Low','Ragged','Still','Chalk',
+  'Ochre','Fallow','Dim','Keen','Blunt','Husk','Vagrant','Sable','Lean','Hoar','Murk'];
+
+var NOUN = {
+  producer:  ['Moss','Frond','Bloom','Weed','Mat','Vine','Algae','Reed','Lichen','Thallus','Sprout','Bract','Crust'],
+  herbivore: ['Grazer','Nibbler','Cropper','Browser','Forager','Gleaner','Chewer','Drifter','Sifter','Rasper','Muncher'],
+  predator:  ['Stalker','Hunter','Reaver','Lancer','Culler','Prowler','Raptor','Shrike','Fang','Harrier','Lurker'],
+  decomposer:['Rot','Mold','Sapper','Render','Husker','Digester','Mycel','Blight','Sink','Ferment'],
+  special:   ['Anomaly','Cipher','Relict','Wanderer','Vestige']
+};
+
+/* 字形池: 字形=物种，颜色=营养级。避开 & < > 以省去 HTML 转义 */
+var GLYPHS = {
+  producer:  'wmnvrszxcujtyk',
+  herbivore: 'hbdgpqfleaoi',
+  predator:  'AKXVYTFWMNRZHBDGPQ',
+  decomposer:'%$@§µø¤¶‡†~^*',
+  special:   '¥ß×÷±'
+};
+
+var TIERS = ['producer','herbivore','predator','decomposer'];
+var TIER_HUE = { producer:128, herbivore:48, predator:9, decomposer:272, special:186 };
+
+/* ============================== SPECIES ==============================
+   物种 = 模板(基因均值) + 表现型编码(字形/色相)。
+   个体携带自己的 genome；偏离模板过远 → 分化为新物种。
+   ==================================================================== */
+
+/* 基因组数值键 —— 只有这些参与突变、距离计算与分化 */
+var GENES = ['metabolism','speed','vision','reproThreshold','reproCost','mutationRate','lifespan','absorb','digest','bite'];
+/* 距离权重：行为学上更"重要"的参数权重更高，避免寿命微调就触发分化 */
+var GENE_W = { metabolism:1.3, speed:1.0, vision:1.1, reproThreshold:1.2, reproCost:0.7,
+               mutationRate:0.3, lifespan:0.6, absorb:0.9, digest:1.0, bite:0.9 };
+/* 各基因的硬性上下界，防止突变跑飞（例如 metabolism→0 的永动生物） */
+var GENE_CLAMP = {
+  metabolism:[0.02,1.6], speed:[0.6,6], vision:[0,7], reproThreshold:[6,240],
+  reproCost:[3,140], mutationRate:[0.005,0.55], lifespan:[60,1400], absorb:[0,3.2],
+  digest:[3,60], bite:[1,4000]
+};
+
+/* 各营养级的基础模板 —— 默认参数已调至可维持三层共存的震荡态 */
+var BASE = {
+  /* 生产者要"少而肥"而不是"多而瘦"。
+     廉价生产者(cost 6)会以极低能量密铺全场：食草者被食物包围，却每口只得 2~3 能量，
+     不足以支付一个消化周期的代谢 → 在食物堆里活活饿死。
+     提高个体造价后：数量下降、单体能量高、留出空地，整条食物链才有利可图。 */
+  producer: {
+    tier:'producer', diet:[],
+    metabolism:0.13,           // 满格时总代谢必须远超光照输入，否则"绿毯"是稳定吸引子
+    speed:0, vision:0,         // 固着不动
+    absorb:0.90,               // 每 tick 从本格养分最多吸收量（受 light / 遮荫调制）
+    reproThreshold:30, reproCost:15,
+    mutationRate:0.06, lifespan:320, startEnergy:15, digest:0, bite:0
+  },
+  herbivore: {
+    tier:'herbivore', diet:['producer'],
+    metabolism:0.095,
+    speed:3, vision:2,         // 视野小 → 生产者有空间避难所，是防崩溃的关键
+    absorb:0,
+    /* 世代时间必须严格慢于食物层：生产者约 80 tick 翻倍，食草者须 ~140 tick。
+       消费者若比资源繁殖得快，任何初始扰动都会被放大成"吃光→饿死"。 */
+    reproThreshold:55, reproCost:27,
+    mutationRate:0.07, lifespan:460, startEnergy:27,
+    digest:14,                // 消化时间(Holling II 功能反应)：吃完后 N tick 不能再吃。
+                               // 没有它，捕食速率无上限 → 尖峰崩溃而非极限环
+    bite:6                     // 每口只啃走 9 点能量，不杀死植株（见 eat()）
+  },
+  predator: {
+    tier:'predator', diet:['herbivore','decomposer'],
+    metabolism:0.10,
+    speed:1.6, vision:3,       // 视野小 = 捕食成功率强烈依赖猎物密度 (Holling III)。
+                               // 猎物稀少时捕食者找不到并饿死，猎物得以恢复 ——
+                               // 这是把发散振荡收敛成极限环的核心机制。
+                               // 视野过大(6)时捕食者能找到最后 1% 的猎物并赶尽杀绝。
+    absorb:0,
+    reproThreshold:130, reproCost:65,  // 高阈值 → 捕食者滞后于猎物，产生相位差
+    mutationRate:0.07, lifespan:800, startEnergy:72,
+    digest:70,                 // 消化期越长 → 单位时间杀伤率越低。这是捕食者不至于
+                               // 把猎物清零的主要闸门
+    bite:400                   // 远大于任何猎物能量 → 捕食者总是整只吃掉并杀死目标
+  },
+  decomposer: {
+    tier:'decomposer', diet:[],
+    metabolism:0.055,
+    speed:1.2, vision:3,       // 要够快够远才能找到分散的尸体
+    absorb:1.60,               // 每 tick 最多分解的腐殖质量
+    reproThreshold:26, reproCost:13,
+    mutationRate:0.06, lifespan:320, startEnergy:13, digest:0, bite:0
+  }
+};
+
+function makeGenome(tmpl){
+  var g = {};
+  for (var i=0;i<GENES.length;i++){ var k = GENES[i]; g[k] = tmpl[k]; }
+  return g;
+}
+function cloneGenome(g){
+  var o = {};
+  for (var i=0;i<GENES.length;i++){ var k = GENES[i]; o[k] = g[k]; }
+  return o;
+}
+
+/* 突变：按 mutationRate 逐基因微调 ±5%~15% */
+function mutate(g, rng, rateMul){
+  var out = cloneGenome(g);
+  var rate = Math.min(0.95, g.mutationRate * (rateMul || 1));
+  var changed = false;
+  for (var i=0;i<GENES.length;i++){
+    var k = GENES[i];
+    if (!rng.chance(rate)) continue;
+    var step = rng.range(CONFIG.MUT_STEP_MIN, CONFIG.MUT_STEP_MAX);
+    var v = out[k] * (1 + (rng.chance(0.5) ? step : -step));
+    // 固着生物的 speed/vision、非生产者的 absorb 保持为 0，不让它们漂移出无意义的值
+    if (out[k] === 0) v = 0;
+    var c = GENE_CLAMP[k];
+    if (v < c[0]) v = c[0]; if (v > c[1]) v = c[1];
+    out[k] = v; changed = true;
+  }
+  return changed ? out : out;
+}
+
+/* 归一化基因距离：与物种模板的加权相对偏差均值 */
+function geneDist(g, tmpl){
+  var sum = 0, wsum = 0;
+  for (var i=0;i<GENES.length;i++){
+    var k = GENES[i], t = tmpl[k];
+    if (!t) continue;                       // 模板为 0 的基因不参与
+    var w = GENE_W[k];
+    sum += w * Math.abs(g[k] - t) / t;
+    wsum += w;
+  }
+  return wsum ? sum / wsum : 0;
+}
+
+function pickGlyph(w, tier, rng){
+  var pool = GLYPHS[tier], used = {};
+  for (var i=0;i<w.species.length;i++){
+    if (w.species[i].alive) used[w.species[i].glyph] = 1;
+  }
+  var free = [];
+  for (var j=0;j<pool.length;j++) if (!used[pool[j]]) free.push(pool[j]);
+  if (!free.length) free = pool.split('');       // 池耗尽则允许复用
+  return rng.pick(free);
+}
+
+function makeName(w, tier, rng, parentName){
+  var noun;
+  if (parentName){
+    // 分化命名：保留亲代的名词，换一个新形容词 —— 读起来像同一谱系
+    var p = parentName.split(' ');
+    noun = p[p.length-1];
+  } else {
+    noun = rng.pick(NOUN[tier] || NOUN.producer);
+  }
+  var used = {};
+  for (var i=0;i<w.species.length;i++) used[w.species[i].name] = 1;
+  for (var tries=0; tries<40; tries++){
+    var n = rng.pick(ADJ) + ' ' + noun;
+    if (!used[n]) return n;
+  }
+  return rng.pick(ADJ) + ' ' + rng.pick(NOUN[tier] || NOUN.producer);
+}
+
+/* 注册一个物种。parent 存在时表示这是一次分化 */
+function registerSpecies(w, tmpl, rng, parent){
+  var hue = TIER_HUE[tmpl.tier];
+  var sat, lig;
+  if (parent){
+    // 在亲代色相附近偏移，让谱系在视觉上可辨认
+    hue = parent.hue + rng.range(-26, 26);
+    sat = Math.max(30, Math.min(85, parent.sat + rng.range(-10, 10)));
+    lig = Math.max(38, Math.min(72, parent.lig + rng.range(-8, 8)));
+  } else {
+    hue += rng.range(-8, 8);
+    sat = tmpl.tier === 'producer' ? 44 : 58;
+    lig = 56;
+  }
+  var sp = {
+    id: w.species.length,
+    glyph: pickGlyph(w, tmpl.tier, rng),
+    tier: tmpl.tier,
+    diet: tmpl.diet.slice(),
+    name: makeName(w, tmpl.tier, rng, parent ? parent.name : null),
+    hue: hue, sat: sat, lig: lig,
+    color: 'hsl(' + hue.toFixed(0) + ',' + sat.toFixed(0) + '%,' + lig.toFixed(0) + '%)',
+    tmpl: makeGenome(tmpl),
+    startEnergy: tmpl.startEnergy,
+    parent: parent ? parent.id : -1,
+    bornTick: w.t,
+    deadTick: -1,
+    alive: true,
+    peak: 0,
+    count: 0
+  };
+  w.species.push(sp);
+  return sp;
+}
+
+/* 程序化生成 Codex 描述句 —— 从参数读出"生态位画像" */
+function describeSpecies(sp){
+  var g = sp.tmpl, s = [];
+  var t = sp.tier;
+  if (t === 'producer'){
+    s.push(g.absorb > 1.3 ? 'An avid fixer of loose nutrient' :
+           g.absorb < 0.85 ? 'A frugal, slow-fixing autotroph' : 'A steady autotroph');
+  } else if (t === 'herbivore'){
+    s.push(g.vision > 4 ? 'A far-sighted grazer' : g.vision < 2 ? 'A near-blind browser' : 'A grazer of standing crop');
+  } else if (t === 'predator'){
+    s.push(g.speed < 1.3 ? 'A fast-moving hunter' : g.speed > 2.6 ? 'An ambush hunter, slow between strikes' : 'A coursing hunter');
+  } else {
+    s.push('A reducer working the nutrient sinks');
+  }
+  s.push(g.metabolism > (BASE[t].metabolism * 1.25) ? 'burns energy quickly' :
+         g.metabolism < (BASE[t].metabolism * 0.8) ? 'runs on a slow metabolism' : 'holds a typical metabolism');
+  s.push(g.reproThreshold < BASE[t].reproThreshold * 0.85 ? 'and divides early' :
+         g.reproThreshold > BASE[t].reproThreshold * 1.2 ? 'and divides only when well fed' : 'and divides at the usual mass');
+  var tail = g.lifespan > BASE[t].lifespan * 1.25 ? ' Long-lived.' :
+             g.lifespan < BASE[t].lifespan * 0.75 ? ' Short-lived.' : '';
+  var mut = g.mutationRate > BASE[t].mutationRate * 1.8 ? ' Genetically unstable.' : '';
+  return s.join(', ') + '.' + tail + mut;
+}
+
+/* ============================== WORLD ==============================
+   网格用 TypedArray（occ 存 organismId+1，0 表示空格），生物体存对象池。
+   边界环绕 (toroidal)，无角落死区。
+   ================================================================== */
+
+/* 随机"物理法则"：每个 run 抽 1~2 条，改变整局的手感 */
+var LAWS = [
+  { id:'PHOTOPERIOD', name:'PHOTOPERIOD', desc:'Day and night swing hard. Light amplitude doubled, period halved.',
+    apply:function(w){ w.env.lightAmp *= 2.1; w.env.lightPeriod *= 0.5; } },
+  { id:'VISCOUS', name:'VISCOUS', desc:'The medium is thick. All movement is halved.',
+    apply:function(w){ w.mods.speedMul = 2.0; } },
+  { id:'FECUND', name:'FECUND', desc:'Reproduction is cheap, life is short.',
+    apply:function(w){ w.mods.reproMul = 0.72; w.mods.lifespanMul = 0.5; } },
+  { id:'SCARCITY', name:'SCARCITY', desc:'Only half of dead biomass returns to the substrate.',
+    apply:function(w){ w.mods.recycleMul = 0.5; } },
+  { id:'RADIANT', name:'RADIANT', desc:'Background radiation. Mutation rates run high.',
+    apply:function(w){ w.mods.mutMul = 3.2; } },
+  { id:'TORPOR', name:'TORPOR', desc:'A cold world. Metabolism and growth both slow.',
+    apply:function(w){ w.env.tempBase -= 0.18; w.mods.metabMul = 0.85; } },
+  { id:'BLOOM', name:'BLOOM', desc:'The substrate is unusually fertile.',
+    apply:function(w){ w.mods.insolationMul = 1.45; } },
+  { id:'THIN', name:'THIN AIR', desc:'Sight carries far, but every breath costs.',
+    apply:function(w){ w.mods.visionAdd = 2; w.mods.metabMul = 1.22; } }
+];
+
+var RUN_ADJ = ['Verdant','Quiet','Turbid','Ashen','Shallow','Bitter','Long','Pale','Coiled','Iron',
+  'Restless','Slow','Bright','Hollow','Salt','Grey','Vagrant','Fallow'];
+var RUN_NOUN = ['Basin','Shelf','Drift','Bed','Reach','Flat','Terrace','Pool','Sink','Bench','Margin','Verge'];
+
+function runLabel(seed, rng){
+  var hex = (seed >>> 0).toString(16).toUpperCase();
+  while (hex.length < 4) hex = '0' + hex;
+  return 'RUN-' + hex.slice(-4) + ' · ' + rng.pick(RUN_ADJ) + ' ' + rng.pick(RUN_NOUN);
+}
+
+/* 起始倾向 —— 影响开局物种构成，是 run 之间差异感的来源 */
+var STARTS = [
+  { id:'balanced',  name:'Balanced start',       mul:{producer:1,   herbivore:1,   predator:1,   decomposer:1} },
+  { id:'predheavy', name:'Predator-heavy start', mul:{producer:0.95,herbivore:1.15,predator:2.2, decomposer:1} },
+  { id:'barren',    name:'Barren world',         mul:{producer:0.6, herbivore:0.55,predator:0.5, decomposer:0.7} },
+  { id:'green',     name:'Green world',          mul:{producer:1.4, herbivore:0.75,predator:0.5, decomposer:1} },
+  { id:'rotten',    name:'Saprophytic world',    mul:{producer:0.85,herbivore:0.85,predator:0.8, decomposer:2.6} },
+  { id:'grazed',    name:'Overgrazed start',     mul:{producer:0.85,herbivore:1.6, predator:0.7, decomposer:1} }
+];
+
+function createWorld(seed, opts){
+  opts = opts || {};
+  var rng = makeRng(seed);
+  var W = CONFIG.W, H = CONFIG.H, N = W * H;
+
+  var w = {
+    version: 1,
+    seed: seed >>> 0,
+    t: 0,
+    W: W, H: H, N: N,
+    nutrient: new Float32Array(N),
+    detritus: new Float32Array(N),
+    occ: new Int32Array(N),        // 0=空, 否则 organismId+1
+    orgs: [],                      // 稀疏数组，null 表示空位
+    free: [],                      // 空位回收表
+    pop: 0,
+    species: [],
+    rng: rng,
+    chronicle: [],
+    hist: [],                      // 采样历史 {t, total, tiers, byId}
+    stats: { deaths:0, births:0, eaten:0, speciations:0, extinctions:0,
+             peakBiomass:0, peakPop:0, heatLoss:0, influx:0 },
+    ledger: { in:0, out:0 },
+    lastSpeciation: -9999,
+    dominant: -1,
+    oscil: { last:-9999, period:0 },
+    windowDeaths: 0,
+    ended: false, endReason: '',
+
+    /* 世界法则修正量 */
+    mods: { speedMul:1, reproMul:1, lifespanMul:1, recycleMul:1, mutMul:1,
+            metabMul:1, insolationMul:1, visionAdd:0 },
+
+    /* 环境：温度与光照都做缓慢周期波动 + 随机漂移 */
+    env: {
+      temp: 0.5, tempBase: 0.5, tempAmp: 0.13, tempPeriod: 2200, tempDrift: 0,
+      light: 0.75, lightBase: 0.75, lightAmp: 0.18, lightPeriod: 900, lightDrift: 0,
+      tempOffset: 0, tempOffsetUntil: 0,   // 玩家 WARM/COOL 干预
+      irrad: []                            // {x,y,r,until} 辐照区
+    },
+    laws: [], startId: '', label: ''
+  };
+
+  buildWrap(w);
+
+  /* --- 抽 world laws --- */
+  var nLaws = rng.chance(0.42) ? 2 : 1;
+  var pool = LAWS.slice();
+  for (var i=0;i<nLaws;i++){
+    var k = rng.int(pool.length);
+    w.laws.push(pool[k].id);
+    pool.splice(k,1);
+  }
+  /* 全局随机化"物理"：突变倍率 / 温度幅度 / 光强与周期 */
+  w.mods.mutMul *= rng.range(0.7, 1.7);
+  w.env.tempAmp *= rng.range(0.6, 1.8);
+  w.env.tempPeriod *= rng.range(0.7, 1.5);
+  w.env.lightBase = 0.62 + rng.range(0, 0.28);
+  w.env.lightAmp *= rng.range(0.6, 1.7);
+  w.env.lightPeriod *= rng.range(0.7, 1.6);
+  w.mods.insolationMul *= rng.range(0.85, 1.2);
+
+  for (var L=0; L<w.laws.length; L++) getLaw(w.laws[L]).apply(w);
+
+  var st = rng.pick(STARTS);
+  w.startId = st.id;
+  w.label = runLabel(seed, rng);
+
+  /* --- 初始养分：带一点空间结构，别是均匀汤 --- */
+  for (var idx=0; idx<N; idx++){
+    var x = idx % W, y = (idx / W) | 0;
+    var f = 0.5 + 0.5 * Math.sin(x * 0.19 + seed * 0.001) * Math.cos(y * 0.23);
+    // 起始库存要接近稳态而非"满仓"：库存过大会催出一次超大初级生产峰，
+    // 随之而来的食草者过冲足以把系统直接推出极限环
+    w.nutrient[idx] = CONFIG.NUTRIENT_CAP * (0.16 + f * 0.22) + rng.range(-2, 2);
+    if (w.nutrient[idx] < 0) w.nutrient[idx] = 0;
+    /* 初始腐殖质：世界并非无菌开局，本来就有陈年遗骸。
+       没有它，开局前 ~320 tick 没有任何自然死亡 → 腐殖质为 0 → 分解者必然饿死，
+       等尸体真正出现时它们已经灭绝了。 */
+    if (rng.chance(0.16)) w.detritus[idx] = rng.range(6, 26);
+  }
+
+  /* --- 注册初始物种并播种 --- */
+  var counts = { producer:2, herbivore:2, predator:1, decomposer:1 };
+  if (st.id === 'rotten') counts.decomposer = 2;
+  if (st.id === 'predheavy') counts.predator = 2;
+  if (st.id === 'barren') { counts.producer = 1; counts.herbivore = 1; }
+
+  for (var ti=0; ti<TIERS.length; ti++){
+    var tier = TIERS[ti];
+    var n = counts[tier];
+    var want = Math.round(CONFIG.START_POP[tier] * (st.mul[tier] || 1));
+    for (var s=0; s<n; s++){
+      var sp = registerSpecies(w, BASE[tier], rng, null);
+      var each = Math.round(want / n);
+      for (var p=0; p<each; p++) spawnRandom(w, sp);
+    }
+  }
+
+  logEvent(w, 'major', 'Run ' + w.label + ' opened. ' + st.name + '.');
+  for (var lw=0; lw<w.laws.length; lw++){
+    var law = getLaw(w.laws[lw]);
+    logEvent(w, 'info', 'World law ' + law.name + ' — ' + law.desc);
+  }
+  sample(w);
+  return w;
+}
+
+function getLaw(id){
+  for (var i=0;i<LAWS.length;i++) if (LAWS[i].id === id) return LAWS[i];
+  return LAWS[0];
+}
+
+/* --- 网格工具（环绕） ---
+   取模是本模拟最热的操作之一（每 tick 约 5 万次），改为查表消除除法。
+   表覆盖 [-W, 2W)，足以容纳视野半径与孢子扩散的偏移量。 */
+function buildWrap(w){
+  var i, W=w.W, H=w.H;
+  var wx = w._wx = new Int32Array(W*3), wy = w._wy = new Int32Array(H*3);
+  for (i=0;i<W*3;i++) wx[i] = ((i - W) % W + W) % W;
+  for (i=0;i<H*3;i++) wy[i] = ((i - H) % H + H) % H;
+}
+function wrapX(w,x){ return w._wx[x + w.W]; }
+function wrapY(w,y){ return w._wy[y + w.H]; }
+function at(w,x,y){ return w._wy[y + w.H] * w.W + w._wx[x + w.W]; }
+
+/* --- 生物体创建 / 销毁 --- */
+function newOrg(w, sp, x, y, energy, genome){
+  var idx = y * w.W + x;
+  if (w.occ[idx] !== 0) return null;
+  var id = w.free.length ? w.free.pop() : w.orgs.length;
+  var o = {
+    id: id, sid: sp.id, x: x, y: y,
+    energy: energy, age: 0,
+    genome: genome || makeGenome(sp.tmpl),
+    clock: w.rng() * 4,           // 移动相位，避免全场同步抽动
+    gut: 0,                       // 消化倒计时 > 0 时无法进食
+    lineage: sp.id
+  };
+  w.orgs[id] = o;
+  w.occ[idx] = id + 1;
+  w.pop++;
+  sp.count++;
+  if (sp.count > sp.peak) sp.peak = sp.count;
+  return o;
+}
+
+function spawnRandom(w, sp){
+  for (var tries=0; tries<40; tries++){
+    var x = w.rng.int(w.W), y = w.rng.int(w.H);
+    if (w.occ[y * w.W + x] === 0){
+      return newOrg(w, sp, x, y, sp.startEnergy * w.rng.range(0.75, 1.25), null);
+    }
+  }
+  return null;
+}
+
+/* 死亡：剩余能量归还该格养分（养分守恒的核心） */
+function killOrg(w, o, cause){
+  var idx = o.y * w.W + o.x;
+  if (w.occ[idx] === o.id + 1) w.occ[idx] = 0;
+  w.orgs[o.id] = null;
+  w.free.push(o.id);
+  w.pop--;
+  w.stats.deaths++;
+  w.windowDeaths++;
+  var sp = w.species[o.sid];
+  if (sp) sp.count--;
+  if (cause !== 'eaten'){
+    var give = Math.max(0, o.energy) * CONFIG.RECYCLE * w.mods.recycleMul;
+    w.detritus[idx] += give;                 // 尸体进入腐殖质层，等待分解者
+    if (w.mods.recycleMul < 1) w.ledger.out += Math.max(0, o.energy) * (1 - w.mods.recycleMul);
+  }
+}
+
+/* ============================== SIM ==============================
+   每 tick 顺序:
+   1 代谢 → 2 感知 → 3 决策(逃 > 吃 > 追 > 生 > 游走) → 4 进食
+   5 繁殖 → 6 死亡回归养分 → 7 生产者固碳 → 8 分解者转化与扩散
+   ================================================================ */
+
+var DX8 = [1,1,0,-1,-1,-1,0,1], DY8 = [0,1,1,1,0,-1,-1,-1];
+
+function tempFactor(w){ return 0.45 + w.env.temp * 1.10; }   // 温度 → 代谢速率
+
+function updateEnv(w){
+  var e = w.env, t = w.t;
+  e.tempDrift += (w.rng() - 0.5) * 0.0022;
+  if (e.tempDrift > 0.12) e.tempDrift = 0.12;
+  if (e.tempDrift < -0.12) e.tempDrift = -0.12;
+  e.lightDrift += (w.rng() - 0.5) * 0.0022;
+  if (e.lightDrift > 0.12) e.lightDrift = 0.12;
+  if (e.lightDrift < -0.12) e.lightDrift = -0.12;
+
+  var off = (t < e.tempOffsetUntil) ? e.tempOffset : 0;
+  var tv = e.tempBase + e.tempAmp * Math.sin(t * 6.28318 / e.tempPeriod) + e.tempDrift + off;
+  e.temp = tv < 0.02 ? 0.02 : (tv > 1.3 ? 1.3 : tv);
+
+  var lv = e.lightBase + e.lightAmp * Math.sin(t * 6.28318 / e.lightPeriod + 1.1) + e.lightDrift;
+  e.light = lv < 0.02 ? 0.02 : (lv > 1.4 ? 1.4 : lv);
+
+  // 清理过期的辐照区
+  if (e.irrad.length){
+    for (var i=e.irrad.length-1;i>=0;i--) if (t > e.irrad[i].until) e.irrad.splice(i,1);
+  }
+}
+
+/* 某格是否处于辐照区内 → 突变率倍率 */
+function irradMul(w, x, y){
+  var ir = w.env.irrad;
+  for (var i=0;i<ir.length;i++){
+    var a = ir[i];
+    var dx = Math.abs(x - a.x); if (dx > w.W/2) dx = w.W - dx;
+    var dy = Math.abs(y - a.y); if (dy > w.H/2) dy = w.H - dy;
+    if (dx <= a.r && dy <= a.r) return 10;
+  }
+  return 1;
+}
+
+/* 每 tick 预计算一张"植被掩体图"：每格周围有多少生产者。
+   O(1) 查询，避免在捕食者扫描内层循环里反复数邻居。 */
+function buildCover(w){
+  var N=w.N, W=w.W, H=w.H;
+  var cov = w._cover || (w._cover = new Uint8Array(N));
+  var isP = w._isP || (w._isP = new Uint8Array(N));
+  var i, x, y;
+  for (i=0;i<N;i++){
+    var c = w.occ[i];
+    isP[i] = (c !== 0 && w.orgs[c-1] && w.species[w.orgs[c-1].sid].tier === 'producer') ? 1 : 0;
+  }
+  for (y=0;y<H;y++){
+    var yc=y*W, yn=((y+1)%H)*W, yp=((y-1+H)%H)*W;
+    for (x=0;x<W;x++){
+      var xn=(x+1)%W, xp=(x-1+W)%W;
+      cov[yc+x] = isP[yc+xn]+isP[yc+xp]+isP[yn+x]+isP[yp+x]+
+                  isP[yn+xn]+isP[yn+xp]+isP[yp+xn]+isP[yp+xp];
+    }
+  }
+}
+
+/* 构建物种取食矩阵：canEat[a*n+b] = 物种 a 能否吃物种 b */
+function buildDietMatrix(w){
+  var n = w.species.length, m = new Uint8Array(n * n);
+  for (var a=0;a<n;a++){
+    var sa = w.species[a];
+    if (!sa.diet.length) continue;
+    for (var b=0;b<n;b++){
+      if (a === b) continue;
+      var sb = w.species[b];
+      var ok = 0;
+      for (var d=0; d<sa.diet.length; d++){
+        var want = sa.diet[d];
+        if (want === sb.tier || want === sb.id) { ok = 1; break; }
+      }
+      m[a*n+b] = ok;
+    }
+  }
+  w._diet = m; w._dietN = n;
+  return m;
+}
+
+function tick(w){
+  if (w.ended) return;
+  if (!w._wx) buildWrap(w);          // 读档恢复的世界没有查表，惰性构建
+  w.t++;
+  updateEnv(w);
+
+  var W = w.W, H = w.H, N = w.N;
+  var light = w.env.light, tf = tempFactor(w);
+  var nut = w.nutrient, occ = w.occ;
+  var CAP = CONFIG.NUTRIENT_CAP;
+
+  /* --- 7(a) 光照注入养分：系统唯一的能量输入 --- */
+  var ins = CONFIG.INSOLATION * w.mods.insolationMul * light;
+  if (ins > 0){
+    var influx = 0;
+    for (var i=0;i<N;i++){
+      var d = ins * (1 - nut[i] / CAP);
+      if (d > 0){ nut[i] += d; influx += d; }
+    }
+    w.ledger.in += influx;
+    w.stats.influx += influx;
+  }
+
+  /* --- 腐殖质缓慢自然矿化（没有分解者时回收很慢） --- */
+  var det = w.detritus, dk = CONFIG.DETRITUS_DECAY;
+  for (var q=0;q<N;q++){
+    if (det[q] > 0.0005){
+      var m = det[q]*dk;
+      det[q] -= m; nut[q] += m;
+    }
+  }
+
+  /* --- 养分扩散：防止养分锁死在无生物的死区 --- */
+  if (w.t % CONFIG.DIFFUSE_EVERY === 0) diffuse(w);
+
+  var diet = buildDietMatrix(w);
+  var ns = w._dietN;
+  buildCover(w);
+
+  /* --- 打乱行动顺序，避免固定的空间偏置 --- */
+  var order = [], orgs = w.orgs;
+  for (var k=0;k<orgs.length;k++) if (orgs[k]) order.push(k);
+  for (var s=order.length-1;s>0;s--){
+    var j = w.rng.int(s+1), tmp = order[s]; order[s] = order[j]; order[j] = tmp;
+  }
+
+  for (var oi=0; oi<order.length; oi++){
+    var o = orgs[order[oi]];
+    if (!o) continue;                       // 本 tick 内已被吃掉
+    var sp = w.species[o.sid];
+    var g = o.genome;
+
+    /* 1 代谢 */
+    o.age++;
+    if (o.gut > 0) o.gut--;
+    var burn = g.metabolism * tf * w.mods.metabMul;
+    o.energy -= burn;
+    w.ledger.out += burn;
+    w.stats.heatLoss += burn;
+
+    /* 6 死亡判定 */
+    if (o.energy <= 0){ killOrg(w, o, 'starve'); continue; }
+    if (o.age > g.lifespan * w.mods.lifespanMul){ killOrg(w, o, 'age'); continue; }
+
+    if (sp.tier === 'producer')      actProducer(w, o, g, sp, light, tf);
+    else if (sp.tier === 'decomposer') actDecomposer(w, o, g, sp, tf, diet, ns);
+    else                              actMobile(w, o, g, sp, diet, ns);
+  }
+
+  /* --- 统计与事件检测 --- */
+  if (w.t % CONFIG.HIST_EVERY === 0){ sample(w); detect(w); w.windowDeaths = 0; }
+  if (w.pop === 0 && !w.ended){ endRun(w, 'Total extinction.'); }
+  if (w.t >= CONFIG.RUN_TICK_LIMIT && !w.ended){ endRun(w, 'Tick limit reached.'); }
+}
+
+/* 四邻域养分扩散 */
+function diffuse(w){
+  var W = w.W, H = w.H, n = w.nutrient, r = CONFIG.DIFFUSION;
+  var buf = w._dbuf || (w._dbuf = new Float32Array(w.N));
+  for (var y=0;y<H;y++){
+    var yn = ((y+1)%H)*W, yp = ((y-1+H)%H)*W, yc = y*W;
+    for (var x=0;x<W;x++){
+      var xn = (x+1)%W, xp = (x-1+W)%W;
+      var sum = n[yc+xn] + n[yc+xp] + n[yn+x] + n[yp+x];
+      buf[yc+x] = n[yc+x] + r * (sum * 0.25 - n[yc+x]);
+    }
+  }
+  w.nutrient.set(buf);
+}
+
+/* --- 7 生产者：固着，从本格吸收养分，受光照与温度调制 --- */
+function actProducer(w, o, g, sp, light, tf){
+  var cap = g.reproThreshold * 1.4;
+  var nb = occNeighbors(w, o.x, o.y);
+  if (o.energy < cap){
+    /* 自遮荫：邻居越多，固碳越少。密集群丛因此入不敷出而自疏，
+       站立生物量被压到远低于满格 —— 这是限制食草者过冲幅度的上游闸门，
+       同时自然产生斑块状植被与可通行的空隙。 */
+    var shade = 1 - CONFIG.SHADE * nb;
+    if (shade < 0) shade = 0;
+    // 光响应带一个下限：全黑时仍保留 40% 固碳能力。
+    // 若让 absorb 正比于 light，夜间生产者停止生长而食草者照吃 → 必然全灭。
+    var want = g.absorb * (0.40 + 0.60 * light) * tf * shade;
+    var room = cap - o.energy;
+    if (want > room) want = room;
+    if (want > 0) o.energy += drawNutrient(w, o.x, o.y, want);
+  }
+  // 密度制约：拥挤处不再增殖，网格因此始终留有空隙
+  if (o.energy >= g.reproThreshold * w.mods.reproMul && occNeighbors(w, o.x, o.y) <= CONFIG.CROWD_LIMIT){
+    reproduce(w, o, g, sp);
+  }
+}
+
+/* 根区取食：先吸本格，不够再从 8 邻格各汲取一部分。
+   单格的日照供给 (~0.09/tick) 低于生产者代谢 (~0.12/tick)，只靠本格必然入不敷出；
+   而扩散太慢来不及补。根区让生产者能支配周围数格的通量，
+   同时与邻近生产者共享同一养分池 → 天然的根系竞争。 */
+function drawNutrient(w, x, y, want){
+  var idx = y * w.W + x, got = 0;
+  var take = w.nutrient[idx] < want ? w.nutrient[idx] : want;
+  if (take > 0){ w.nutrient[idx] -= take; got += take; want -= take; }
+  if (want <= 1e-4) return got;
+  var start = w.rng.int(8);
+  for (var i=0; i<8 && want > 1e-4; i++){
+    var ni = at(w, x + DX8[(start+i)%8], y + DY8[(start+i)%8]);
+    var avail = w.nutrient[ni] * CONFIG.ROOT_SHARE;   // 邻格只取一部分，不把根区吸干
+    var t2 = avail < want ? avail : want;
+    if (t2 > 0){ w.nutrient[ni] -= t2; got += t2; want -= t2; }
+  }
+  return got;
+}
+
+function occNeighbors(w, x, y){
+  var n = 0;
+  for (var d=0; d<8; d++) if (w.occ[at(w, x + DX8[d], y + DY8[d])] !== 0) n++;
+  return n;
+}
+
+/* --- 8 分解者：只在高养分格（尸体热点）取食，并把养分向邻格扩散 --- */
+function actDecomposer(w, o, g, sp, tf, diet, ns){
+  var idx = o.y * w.W + o.x;
+  var here = w.detritus[idx];
+  var cap = g.reproThreshold * 1.4;
+  if (here > 0.5 && o.energy < cap){
+    /* 取食腐殖质：一部分转为自身能量，一部分矿化回 nutrient 供生产者使用。
+       这正是分解者的生态职能 —— 把锁在尸体里的能量放回循环。 */
+    var take = Math.min(here * CONFIG.DECOMP_TAKE, g.absorb * tf);
+    if (take > 0){
+      var eat_ = take * (1 - CONFIG.DECOMP_LEAK);
+      var room = cap - o.energy;
+      if (eat_ > room) eat_ = room;
+      w.detritus[idx] -= take;
+      o.energy += eat_;
+      w.nutrient[idx] += take - eat_;       // 矿化产物回到底物
+    }
+  } else {
+    /* 移动时钟：此前这里无条件调用 moveOrg，导致分解者的 speed 基因完全失效
+       （每 tick 都移动），同时每 tick 都要做一次视野扫描 —— 也是最大的性能热点。 */
+    o.clock += 1 / Math.max(0.3, g.speed * w.mods.speedMul);
+    if (o.clock >= 1) moveOrg(w, o, g, seekDetritus(w, o, g));
+  }
+  // 与生产者同样受密度制约：否则分解者会无视遮荫与拥挤铺满全场并挤死生产者
+  if (o.energy >= g.reproThreshold * w.mods.reproMul && occNeighbors(w, o.x, o.y) <= CONFIG.CROWD_LIMIT){
+    reproduce(w, o, g, sp);
+  }
+}
+
+/* 分解者的觅食：朝视野内腐殖质最多的方向（即尸体所在） */
+function seekDetritus(w, o, g){
+  var v = Math.round(g.vision + w.mods.visionAdd);
+  if (v <= 0) return -1;
+  var best = w.detritus[o.y*w.W + o.x] + 0.6, bd = -1;
+  for (var dy=-v; dy<=v; dy++){
+    for (var dx=-v; dx<=v; dx++){
+      if (!dx && !dy) continue;
+      var idx = at(w, o.x+dx, o.y+dy);
+      if (w.detritus[idx] > best){ best = w.detritus[idx]; bd = dirOf(dx,dy); }
+    }
+  }
+  return bd;
+}
+
+function dirOf(dx,dy){
+  var sx = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
+  var sy = dy > 0 ? 1 : (dy < 0 ? -1 : 0);
+  for (var d=0; d<8; d++) if (DX8[d] === sx && DY8[d] === sy) return d;
+  return -1;
+}
+
+/* --- 2/3/4 移动生物：感知 → 决策 → 行动 --- */
+function actMobile(w, o, g, sp, diet, ns){
+  var W = w.W, H = w.H, occ = w.occ, orgs = w.orgs;
+  var v = Math.round(g.vision + w.mods.visionAdd);
+  if (v < 1) v = 1;
+  if (v > 7) v = 7;
+  var base = sp.id * ns;
+
+  var foodX=0, foodY=0, foodD=1e9, foodIdx=-1;
+  var thrX=0, thrY=0, thrD=1e9;
+  var hungry = o.gut <= 0;
+
+  /* 单趟扫描同时找出最近的猎物与最近的威胁 */
+  var cover = w._cover, hide = CONFIG.COVER_MAX, species = w.species;
+  for (var dy=-v; dy<=v; dy++){
+    var yy = wrapY(w, o.y + dy) * W;
+    for (var dx=-v; dx<=v; dx++){
+      if (!dx && !dy) continue;
+      var ci = yy + wrapX(w, o.x + dx);
+      var c = occ[ci];
+      if (c === 0) continue;
+      var other = orgs[c-1];
+      if (!other) continue;
+      var d2 = dx*dx + dy*dy;
+      if (diet[base + other.sid]){
+        if (species[other.sid].tier === 'producer'){
+          /* 大小避难所：能量低于阈值的植株算"幼苗"，小到不值得啃。
+             配合 bite 机制，一株被啃一口后就落到阈值以下进入保护区，
+             于是放牧永远无法把生产者清零 —— 食物网的基座得到保证。 */
+          if (other.energy < CONFIG.GRAZE_MIN) continue;
+        } else if (species[other.sid].tier === 'herbivore'){
+          /* 隐蔽是"渐变"而不是"开关"：发现概率随周围植被密度平滑下降。
+             硬阈值会制造断崖 —— 植被稍密则捕食者全盲饿死，稍疏则猎物被斩尽杀绝，
+             两者之间没有可停留的平衡点。平方律给出连续的密度依赖捕食率，
+             系统才可能落在一个内部稳定点上。
+             分解者在地面尸体间活动、不受植被掩护 —— 捕食者因此始终有备用猎物。 */
+          var cv = cover[ci] * 0.125;
+          if (w.rng() < cv * cv * hide) continue;
+        }
+        if (d2 < foodD){ foodD = d2; foodX = dx; foodY = dy; foodIdx = c-1; }
+      } else if (diet[other.sid * ns + sp.id]){
+        if (d2 < thrD){ thrD = d2; thrX = dx; thrY = dy; }
+      }
+    }
+  }
+
+  /* 移动时钟：speed = 每 N tick 移动一次 */
+  o.clock += 1 / Math.max(0.3, g.speed * w.mods.speedMul);
+  var canMove = o.clock >= 1;
+
+  /* 决策优先级：逃离捕食者 > 进食 > 追逐猎物 > 繁殖 > 随机游走 */
+  if (thrD <= 9){                                   // 逃
+    if (canMove) moveOrg(w, o, g, dirOf(-thrX, -thrY));
+    return;
+  }
+  if (hungry && foodIdx >= 0 && foodD <= 2){        // 进食（八邻域内）
+    eat(w, o, orgs[foodIdx], g);
+    if (o.energy >= g.reproThreshold * w.mods.reproMul) reproduce(w, o, g, sp);
+    return;
+  }
+  if (hungry && foodIdx >= 0){                      // 追
+    if (canMove) moveOrg(w, o, g, dirOf(foodX, foodY));
+    return;
+  }
+  if (o.energy >= g.reproThreshold * w.mods.reproMul){
+    if (reproduce(w, o, g, sp)) return;
+  }
+  /* 兼性食腐：饥饿的捕食者会啃食脚下的尸体。
+     产量被刻意压低（最多补到繁殖阈值的一半），所以这只是一层"活命地板"，
+     不足以支撑繁殖 —— 捕食者不会因此变多去过度捕猎，但也不会在猎物低谷时
+     整群归零。只要世界里还有东西在死，顶级消费者就不会彻底断粮。 */
+  if (sp.tier === 'predator' && hungry){
+    var floorE = g.reproThreshold * 0.5;
+    if (o.energy < floorE){
+      var di = o.y * W + o.x, dv = w.detritus[di];
+      if (dv > 0.5){
+        var got = dv * 0.30 * CONFIG.PREDATION_EFF;
+        if (got > floorE - o.energy) got = floorE - o.energy;
+        var raw = got / CONFIG.PREDATION_EFF;
+        w.detritus[di] -= raw;
+        w.ledger.out += raw - got;          // 30% 热损失，保持能量守恒
+        w.stats.heatLoss += raw - got;
+        o.energy += got;
+        o.gut = g.digest * 0.5;
+        return;
+      }
+    }
+  }
+  /* 已在掩体中且无事可做 → 蹲着不动。
+     猎物若照旧随机游走，会不断走出植被把自己暴露掉，掩体机制形同虚设；
+     "藏好别动"让捕食成功率真正随植被密度下降，从而给捕食者数量封顶。 */
+  if (sp.tier === 'herbivore' && w._cover[o.y*W + o.x] >= 5) return;
+  if (canMove) moveOrg(w, o, g, -1);                // 随机游走
+}
+
+function moveOrg(w, o, g, dir){
+  o.clock -= 1;
+  if (o.clock < 0) o.clock = 0;
+  if (dir < 0) dir = w.rng.int(8);
+  for (var attempt=0; attempt<2; attempt++){
+    var nx = wrapX(w, o.x + DX8[dir]), ny = wrapY(w, o.y + DY8[dir]);
+    var ni = ny * w.W + nx, oi = o.y * w.W + o.x;
+    var c = w.occ[ni];
+    if (c === 0){
+      w.occ[oi] = 0; o.x = nx; o.y = ny; w.occ[ni] = o.id + 1;
+      return true;
+    }
+    /* 固着生物(生产者)不阻挡移动 —— 交换位置，等于"挤过植被"。
+       没有这条，生产者铺满后整个网格会锁死：捕食者被植被围住无法接近猎物，
+       全部饿死，随后食草者失控。这是"绿毯死局"的根源。 */
+    var other = w.orgs[c-1];
+    if (other && w.species[other.sid].tier === 'producer'){
+      w.occ[ni] = o.id + 1; w.occ[oi] = other.id + 1;
+      other.x = o.x; other.y = o.y;
+      o.x = nx; o.y = ny;
+      return true;
+    }
+    dir = w.rng.int(8);          // 被同类挡住：换个方向再试一次
+  }
+  return false;
+}
+
+/* --- 4 进食：取走至多 bite 的能量，获得其中 70%，30% 作为热损失离开系统 ---
+   若一口足以吃光（bite >= 猎物能量）猎物即死亡 —— 捕食者属于这一类。
+   食草者的 bite 很小：它们"啃食"而不杀死植株。这一条至关重要：
+   (1) 把食草者的能量尺度与生产者解耦 —— 同样的能量流可以养活多得多的个体，
+       种群基数变大后随机波动不再轻易触底归零（小网格上灭绝主要是数量太少）；
+   (2) 放牧不再直接消灭初级生产者：取食锋面过后植株仍在，只是变瘦，随后能重新长回。 */
+function eat(w, pred, prey, g){
+  if (!prey) return;
+  var e = Math.max(0, prey.energy);
+  var bite = (g && g.bite) ? g.bite : 1e9;
+  var take = e <= bite ? e : bite;
+  var gain = take * CONFIG.PREDATION_EFF;
+  pred.energy += gain;
+  pred.gut = g ? g.digest : 0;      // 进入消化期，限制单位时间的最大捕食速率
+  w.ledger.out += take - gain;
+  w.stats.heatLoss += take - gain;
+  w.stats.eaten++;
+  prey.energy -= take;
+  if (prey.energy <= 0.05) killOrg(w, prey, 'eaten');
+}
+
+/* --- 5 繁殖：分裂到空邻格，子代基因突变；偏离过大则触发物种分化 --- */
+function reproduce(w, o, g, sp){
+  /* 生产者有一定比例的"孢子远播"：子代落到半径 8 内的随机空格而非邻格。
+     没有它，取食锋面会像推土机一样铲平连续斑块，生产者无法跳到锋面之后 → 全灭。
+     这是生产者能在放牧压力下持续存在的关键机制。 */
+  var spore = (sp.tier === 'producer' && w.rng.chance(CONFIG.SPORE_P));
+  var start = w.rng.int(8);
+  for (var i=0;i<8;i++){
+    var nx, ny;
+    if (spore){
+      var R = CONFIG.SPORE_R;
+      nx = wrapX(w, o.x + w.rng.int(R*2+1) - R);
+      ny = wrapY(w, o.y + w.rng.int(R*2+1) - R);
+    } else {
+      var d = (start + i) % 8;
+      nx = wrapX(w, o.x + DX8[d]); ny = wrapY(w, o.y + DY8[d]);
+    }
+    var ni = ny * w.W + nx;
+    if (w.occ[ni] !== 0) continue;
+
+    var cost = g.reproCost;
+    if (o.energy <= cost + 0.5) return false;
+    o.energy -= cost;
+
+    var mul = w.mods.mutMul * irradMul(w, o.x, o.y);
+    var cg = mutate(g, w.rng, mul);
+    var child = newOrg(w, sp, nx, ny, cost, cg);
+    if (!child) { o.energy += cost; return false; }
+    w.stats.births++;
+    child.lineage = o.lineage;
+    checkSpeciation(w, child, sp);
+    return true;
+  }
+  return false;
+}
+
+/* --- 物种分化：基因组与模板距离超阈值 → 注册新物种 --- */
+function checkSpeciation(w, child, sp){
+  if (w.t < CONFIG.SPECIATION_MIN_TICK) return;
+  if (w.t - w.lastSpeciation < CONFIG.SPECIATION_COOLDOWN) return;
+  var aliveN = 0;
+  for (var i=0;i<w.species.length;i++) if (w.species[i].alive) aliveN++;
+  if (aliveN >= CONFIG.MAX_SPECIES) return;
+  if (geneDist(child.genome, sp.tmpl) < CONFIG.SPECIATION_DIST) return;
+
+  var tmpl = { tier: sp.tier, diet: sp.diet.slice(), startEnergy: sp.startEnergy };
+  for (var k=0;k<GENES.length;k++) tmpl[GENES[k]] = child.genome[GENES[k]];
+
+  var ns = registerSpecies(w, tmpl, w.rng, sp);
+  sp.count--;
+  ns.count++;
+  if (ns.count > ns.peak) ns.peak = ns.count;
+  child.sid = ns.id;
+  child.lineage = ns.id;
+  w.lastSpeciation = w.t;
+  w.stats.speciations++;
+  logEvent(w, 'spec', 'A lineage of ' + sp.name + ' diverged. New species: ' + ns.name + ' (' + ns.glyph + ')');
+  return ns;
+}
+
+function endRun(w, reason){
+  w.ended = true;
+  w.endReason = reason;
+  logEvent(w, 'major', 'Run ended. ' + reason);
+}
+
+/* ============================== EVENTS ==============================
+   主动检测生态事件并写入 Chronicle。
+   语气: 冷静的田野笔记 / 科考日志，短句，无感叹号。
+   ================================================================== */
+
+function logEvent(w, kind, msg){
+  w.chronicle.push({ t: w.t, k: kind, m: msg });
+  if (w.chronicle.length > CONFIG.CHRONICLE_MAX){
+    w.chronicle.splice(0, w.chronicle.length - CONFIG.CHRONICLE_MAX);
+  }
+}
+
+/* 采样一帧种群快照进环形历史 */
+function sample(w){
+  var tiers = { producer:0, herbivore:0, predator:0, decomposer:0 };
+  var counts = {}, biomass = 0;
+  for (var i=0;i<w.orgs.length;i++){
+    var o = w.orgs[i]; if (!o) continue;
+    var sp = w.species[o.sid]; if (!sp) continue;
+    tiers[sp.tier]++;
+    counts[o.sid] = (counts[o.sid] || 0) + 1;
+    biomass += o.energy;
+  }
+  var nut = 0;
+  for (var n=0;n<w.N;n++) nut += w.nutrient[n];
+
+  var rec = { t: w.t, pop: w.pop, tiers: tiers, counts: counts,
+              biomass: biomass, nutrient: nut, deaths: w.windowDeaths };
+  w.hist.push(rec);
+  if (w.hist.length > CONFIG.HIST_LEN) w.hist.shift();
+  if (biomass > w.stats.peakBiomass) w.stats.peakBiomass = biomass;
+  if (w.pop > w.stats.peakPop) w.stats.peakPop = w.pop;
+  return rec;
+}
+
+function histAgo(w, n){
+  var i = w.hist.length - 1 - n;
+  return i >= 0 ? w.hist[i] : null;
+}
+
+function detect(w){
+  var h = w.hist, cur = h[h.length-1];
+  if (!cur) return;
+
+  /* --- 灭绝 --- */
+  for (var i=0;i<w.species.length;i++){
+    var sp = w.species[i];
+    if (sp.alive && sp.count === 0){
+      sp.alive = false; sp.deadTick = w.t;
+      w.stats.extinctions++;
+      logEvent(w, 'ext', sp.name + ' went extinct. Lineage survived ' + (w.t - sp.bornTick) + ' ticks.');
+    }
+  }
+
+  /* --- 大灭绝：一个窗口内死亡数 > 窗口起始种群的 30% --- */
+  var prev = histAgo(w, 1);
+  if (prev && prev.pop > 40 && cur.deaths > prev.pop * 0.30){
+    if (w.t - (w._lastMass || -9999) > 400){
+      w._lastMass = w.t;
+      logEvent(w, 'major', 'Mass mortality. ' + cur.deaths + ' individuals lost in ' +
+        CONFIG.HIST_EVERY + ' ticks, ' + Math.round(cur.deaths / prev.pop * 100) + ' percent of standing population.');
+    }
+  }
+
+  /* --- 单物种 boom / crash：与 10 个采样点前（200 tick）比较 ±50% --- */
+  var ref = histAgo(w, 10);
+  if (ref){
+    w._spCool = w._spCool || {};
+    for (var sid in cur.counts){
+      var now = cur.counts[sid], was = ref.counts[sid] || 0;
+      var s2 = w.species[sid]; if (!s2) continue;
+      if (now < 14 && was < 14) continue;
+      if (w.t - (w._spCool[sid] || -9999) < 600) continue;
+      if (was > 0 && now > was * 1.5 && now - was >= 12){
+        w._spCool[sid] = w.t;
+        logEvent(w, 'boom', s2.name + ' expanding. ' + was + ' to ' + now +
+          ' in ' + (CONFIG.HIST_EVERY*10) + ' ticks.');
+      } else if (was >= 14 && now < was * 0.5){
+        w._spCool[sid] = w.t;
+        logEvent(w, 'crash', s2.name + ' collapsed. ' + was + ' to ' + now + '.');
+      }
+    }
+  }
+
+  /* --- 优势物种：占比超过 40% 且换了主角 --- */
+  if (cur.pop > 60){
+    var top = -1, topN = 0;
+    for (var sid2 in cur.counts){ if (cur.counts[sid2] > topN){ topN = cur.counts[sid2]; top = +sid2; } }
+    if (top >= 0 && topN / cur.pop > 0.40 && top !== w.dominant){
+      w.dominant = top;
+      var sd = w.species[top];
+      if (sd) logEvent(w, 'dom', sd.name + ' is now dominant, holding ' +
+        Math.round(topN / cur.pop * 100) + ' percent of the census.');
+    }
+  }
+
+  /* --- 营养级联：捕食者崩溃后两层窗口内食草者暴涨 ---
+     捕食者本就位于金字塔顶端、数量稀少，窗口与门槛必须放宽，
+     否则这个检测器在真实运行中几乎永远不会触发。 */
+  var r2 = histAgo(w, 3), r4 = histAgo(w, 8);
+  if (r4 && r2 && r4.tiers.predator >= 5){
+    var predDrop = r2.tiers.predator < r4.tiers.predator * 0.65;
+    var herbRise = cur.tiers.herbivore > r2.tiers.herbivore * 1.35 && cur.tiers.herbivore > 20;
+    if (predDrop && herbRise && w.t - (w._lastCascade || -9999) > 900){
+      w._lastCascade = w.t;
+      logEvent(w, 'major', 'Trophic cascade. Predator ranks fell from ' + r4.tiers.predator +
+        ' to ' + r2.tiers.predator + '; grazers rose to ' + cur.tiers.herbivore + ' in the windows since.');
+    }
+  }
+
+  /* --- 捕食者-猎物振荡：对食草者序列做自相关，找显著周期 --- */
+  if (h.length >= 60 && w.t - w.oscil.last > 2400){
+    var series = [];
+    for (var q=h.length-60;q<h.length;q++) series.push(h[q].tiers.herbivore);
+    var p = autocorrPeriod(series);
+    if (p > 0){
+      w.oscil.last = w.t;
+      w.oscil.period = p * CONFIG.HIST_EVERY;
+      logEvent(w, 'info', 'Predator-prey oscillation detected. Period near ' +
+        (p * CONFIG.HIST_EVERY) + ' ticks.');
+    }
+  }
+}
+
+/* 自相关：返回最显著的滞后（采样点数），无显著周期则 0 */
+function autocorrPeriod(x){
+  var n = x.length, mean = 0, i;
+  for (i=0;i<n;i++) mean += x[i];
+  mean /= n;
+  var d = new Array(n), v0 = 0;
+  for (i=0;i<n;i++){ d[i] = x[i] - mean; v0 += d[i]*d[i]; }
+  if (v0 < 1e-6 || mean < 8) return 0;
+  var bestLag = 0, bestR = 0.42;          // 阈值：低于此不算周期
+  for (var lag=4; lag<=28; lag++){
+    var s = 0;
+    for (i=0;i<n-lag;i++) s += d[i]*d[i+lag];
+    var r = s / v0;
+    if (r > bestR){ bestR = r; bestLag = lag; }
+  }
+  return bestLag;
+}
+
+/* ============================== EXPORT ============================== */
+root.TL = {
+  CONFIG: CONFIG, BASE: BASE, LAWS: LAWS, STARTS: STARTS, TIERS: TIERS,
+  GENES: GENES, GLYPHS: GLYPHS, TIER_HUE: TIER_HUE,
+  makeRng: makeRng,
+  createWorld: createWorld, tick: tick, sample: sample, detect: detect,
+  logEvent: logEvent, getLaw: getLaw,
+  newOrg: newOrg, killOrg: killOrg, spawnRandom: spawnRandom,
+  registerSpecies: registerSpecies, describeSpecies: describeSpecies,
+  makeGenome: makeGenome, cloneGenome: cloneGenome, geneDist: geneDist,
+  at: at, wrapX: wrapX, wrapY: wrapY, tempFactor: tempFactor, endRun: endRun
+};
+
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+/*<<<CORE_END>>>*/
+</script>
+
+<script>
+/* ============================================================================
+   TEXTLIFE — 应用层: SAVE / RENDER / UI / LOOP
+   与内核解耦：内核是纯数据，本层只读取并绘制。
+   ========================================================================== */
+(function(){
+'use strict';
+var TL = window.TL, CONFIG = TL.CONFIG, GENES = TL.GENES;
+
+var SAVE_KEY = 'textlife.v1', CODEX_KEY = 'textlife.codex.v1';
+var $ = function(s){ return document.querySelector(s); };
+
+var el = {
+  grid:$('#grid'), gridwrap:$('#gridwrap'), worldpane:$('#worldpane'),
+  species:$('#specieslist'), spCount:$('#sp-count'), chart:$('#chart'), chartMax:$('#chart-max'),
+  chron:$('#chronicle'), tip:$('#tip'), cursor:$('#cursor'),
+  runname:$('#runname'), laws:$('#laws'),
+  vTemp:$('#v-temp'), vLight:$('#v-light'), vEnergy:$('#v-energy'),
+  gTemp:$('#g-temp'), gLight:$('#g-light'),
+  vTick:$('#v-tick'), vPop:$('#v-pop'), influence:$('#influence'), infNext:$('#inf-next'),
+  overlay:$('#overlay'), modal:$('#modal'),
+  boot:$('#boot'), bootbar:$('#bootbar'), boottext:$('#boottext'),
+  spStyle:null
+};
+
+var app = {
+  world:null, codex:{}, speed:1, tool:null, seedSpecies:null,
+  influence:{ points:CONFIG.INFLUENCE_MAX, at:Date.now() },
+  chronDrawn:0, lastSpeciesSig:'', paused:false, cw:8.4, ch:15
+};
+
+function round(v,d){ var p=Math.pow(10,d||1); return Math.round(v*p)/p; }
+function esc(s){ return String(s).replace(/[&<>]/g,function(c){return c==='&'?'&amp;':c==='<'?'&lt;':'&gt;';}); }
+
+/* ============================== SAVE ============================== */
+function gArr(g){ var a=[]; for (var i=0;i<GENES.length;i++) a.push(round(g[GENES[i]],4)); return a; }
+function gObj(a){ var g={}; for (var i=0;i<GENES.length;i++) g[GENES[i]] = a[i]||0; return g; }
+
+function serialize(w){
+  var orgs=[], i;
+  for (i=0;i<w.orgs.length;i++){
+    var o=w.orgs[i]; if(!o) continue;
+    orgs.push([o.sid,o.x,o.y,round(o.energy,2),o.age,round(o.clock,2),o.gut,o.lineage,gArr(o.genome)]);
+  }
+  var sp=[];
+  for (i=0;i<w.species.length;i++){
+    var q=w.species[i];
+    sp.push([q.id,q.glyph,q.tier,q.diet,q.name,round(q.hue,1),round(q.sat,1),round(q.lig,1),
+             gArr(q.tmpl),q.startEnergy,q.parent,q.bornTick,q.deadTick,q.alive?1:0,q.peak]);
+  }
+  var nut=new Array(w.N), det=new Array(w.N);
+  for (i=0;i<w.N;i++){ nut[i]=round(w.nutrient[i],1); det[i]=round(w.detritus[i],1); }
+  return { v:1, seed:w.seed, t:w.t, W:w.W, H:w.H, rng:w.rng.state(),
+    nut:nut, det:det, orgs:orgs, species:sp, env:w.env, mods:w.mods, laws:w.laws,
+    startId:w.startId, label:w.label, stats:w.stats, ledger:w.ledger,
+    dominant:w.dominant, lastSpeciation:w.lastSpeciation, oscil:w.oscil,
+    ended:w.ended, endReason:w.endReason,
+    chronicle:w.chronicle.slice(-220), hist:w.hist.slice(-CONFIG.HIST_LEN),
+    influence:app.influence, ts:Date.now() };
+}
+
+function deserialize(d){
+  var w = {
+    version:1, seed:d.seed, t:d.t, W:d.W, H:d.H, N:d.W*d.H,
+    nutrient:new Float32Array(d.W*d.H), detritus:new Float32Array(d.W*d.H),
+    occ:new Int32Array(d.W*d.H),
+    orgs:[], free:[], pop:0, species:[], rng:TL.makeRng(d.seed),
+    chronicle:d.chronicle||[], hist:d.hist||[],
+    stats:d.stats||{}, ledger:d.ledger||{in:0,out:0},
+    dominant:d.dominant, lastSpeciation:d.lastSpeciation,
+    oscil:d.oscil||{last:-9999,period:0}, windowDeaths:0,
+    ended:!!d.ended, endReason:d.endReason||'',
+    mods:d.mods, env:d.env, laws:d.laws, startId:d.startId, label:d.label
+  };
+  w.rng.setState(d.rng);
+  var i;
+  for (i=0;i<w.N;i++){ w.nutrient[i]=d.nut[i]||0; w.detritus[i]=(d.det&&d.det[i])||0; }
+  for (i=0;i<d.species.length;i++){
+    var a=d.species[i];
+    w.species.push({ id:a[0], glyph:a[1], tier:a[2], diet:a[3], name:a[4],
+      hue:a[5], sat:a[6], lig:a[7],
+      color:'hsl('+(+a[5]).toFixed(0)+','+(+a[6]).toFixed(0)+'%,'+(+a[7]).toFixed(0)+'%)',
+      tmpl:gObj(a[8]), startEnergy:a[9], parent:a[10], bornTick:a[11],
+      deadTick:a[12], alive:!!a[13], peak:a[14], count:0 });
+  }
+  for (i=0;i<d.orgs.length;i++){
+    var o=d.orgs[i], sp=w.species[o[0]]; if(!sp) continue;
+    var org={ id:w.orgs.length, sid:o[0], x:o[1], y:o[2], energy:o[3], age:o[4],
+              clock:o[5], gut:o[6], lineage:o[7], genome:gObj(o[8]) };
+    w.orgs.push(org); w.occ[org.y*w.W+org.x]=org.id+1; w.pop++; sp.count++;
+  }
+  if (d.influence) app.influence = d.influence;
+  return w;
+}
+
+function save(){
+  if (!app.world) return;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(serialize(app.world))); } catch(e){}
+}
+function loadSave(){
+  try {
+    var raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    var d = JSON.parse(raw);
+    if (!d || d.v !== 1 || !d.species || !d.nut || !d.orgs) return null;
+    return d;
+  } catch(e){ return null; }        // 损坏 → 优雅重置
+}
+function loadCodex(){
+  try { var r=localStorage.getItem(CODEX_KEY); app.codex = r ? (JSON.parse(r)||{}) : {}; }
+  catch(e){ app.codex = {}; }
+}
+function saveCodex(){ try { localStorage.setItem(CODEX_KEY, JSON.stringify(app.codex)); } catch(e){} }
+
+function codexKey(sp){ return sp.tier+'|'+sp.name; }
+function recordCodex(sp, w, preserved){
+  var k = codexKey(sp), e = app.codex[k];
+  var lived = (sp.deadTick > 0 ? sp.deadTick : w.t) - sp.bornTick;
+  if (!e){
+    app.codex[k] = { glyph:sp.glyph, name:sp.name, tier:sp.tier,
+      hue:sp.hue, sat:sp.sat, lig:sp.lig, tmpl:gArr(sp.tmpl), startEnergy:sp.startEnergy,
+      firstRun:w.label, lived:lived, peak:sp.peak, desc:TL.describeSpecies(sp),
+      preserved:!!preserved, seen:1 };
+  } else {
+    e.seen++;
+    if (lived > e.lived) e.lived = lived;
+    if (sp.peak > e.peak) e.peak = sp.peak;
+    if (preserved) e.preserved = true;
+  }
+  saveCodex();
+}
+/* 把当前所有活着的物种收进 Codex（run 结束时调用） */
+function harvestCodex(w){
+  for (var i=0;i<w.species.length;i++){
+    if (w.species[i].peak > 0) recordCodex(w.species[i], w, false);
+  }
+}
+
+/* ============================== RENDER ============================== */
+function syncSpeciesStyles(w){
+  var sig = w.species.length+':'+w.species.length;
+  if (sig === app.lastSpeciesSig) return;
+  app.lastSpeciesSig = sig;
+  if (!el.spStyle){ el.spStyle=document.createElement('style'); document.head.appendChild(el.spStyle); }
+  var css='';
+  for (var i=0;i<w.species.length;i++) css += '.s'+w.species[i].id+'{color:'+w.species[i].color+'}';
+  el.spStyle.textContent = css;
+}
+
+/* 实测字符宽度，保证 inline-block 生物与纯文本背景严格对齐 */
+function measureCell(){
+  var probe=document.createElement('span');
+  probe.style.cssText='position:absolute;visibility:hidden;white-space:pre';
+  probe.textContent=new Array(101).join('M');
+  el.grid.appendChild(probe);
+  var cw=probe.getBoundingClientRect().width/100;
+  el.grid.removeChild(probe);
+  if (cw>0){
+    app.cw=cw;
+    var fs=parseFloat(getComputedStyle(el.grid).fontSize);
+    app.ch=Math.round(fs*1.16);
+    var r=document.documentElement.style;
+    r.setProperty('--cw',cw.toFixed(3)+'px');
+    r.setProperty('--ch',app.ch+'px');
+  }
+}
+/* 自适应字号：72 列必须塞进可用宽度（手机竖屏会缩得很小） */
+function fitGrid(){
+  var w=app.world; if(!w) return;
+  var avail=el.worldpane.clientWidth-20;
+  var fs=Math.min(16, Math.max(5, Math.floor(avail/w.W/0.60)));
+  document.documentElement.style.setProperty('--fs',fs+'px');
+  measureCell();
+}
+
+var NUT_CH=[' ','·','·',':','·',':','≡'];       // 0-3 养分档，4-6 腐殖质档
+var BG_CLS=['','n1','n2','n3','d1','d2','d3'];
+function bgRun(run,cls){ return cls>0 ? '<u class="'+BG_CLS[cls]+'">'+run+'</u>' : run; }
+function renderGrid(w){
+  syncSpeciesStyles(w);
+  var W=w.W,H=w.H,occ=w.occ,nut=w.nutrient,det=w.detritus,orgs=w.orgs,species=w.species;
+  var CAP=CONFIG.NUTRIENT_CAP, lifeMul=w.mods.lifespanMul;
+  var out=[], run='', runCls=-1;
+  for (var y=0;y<H;y++){
+    var row=y*W;
+    for (var x=0;x<W;x++){
+      var i=row+x, c=occ[i];
+      if (c!==0){
+        var o=orgs[c-1];
+        if (o){
+          if (run){ out.push(bgRun(run,runCls)); run=''; runCls=-1; }
+          var g=o.genome;
+          var er=o.energy/(g.reproThreshold||1);           // 字号 = 能量
+          var eb=er<0.35?0:er<0.6?1:er<0.85?2:er<1.15?3:4;
+          var ar=o.age/((g.lifespan||1)*lifeMul);          // 透明度 = 年龄
+          var ab=ar<0.12?0:ar<0.72?1:2;
+          out.push('<i class="s'+o.sid+' e'+eb+' g'+ab+'">'+species[o.sid].glyph+'</i>');
+          continue;
+        }
+      }
+      /* 空格：先看腐殖质（尸体热点，紫），否则显示养分浓度（绿） */
+      var dv=det[i]/CAP, k;
+      if (dv>0.10){ k = dv<0.30?4:dv<0.60?5:6; }
+      else { var v=nut[i]/CAP; k = v<0.08?0:v<0.32?1:v<0.62?2:3; }
+      if (k!==runCls){
+        if (run) out.push(bgRun(run,runCls));
+        run=''; runCls=k;
+      }
+      run+=NUT_CH[k];
+    }
+    if (run){ out.push(runCls>0?'<u class="n'+runCls+'">'+run+'</u>':run); run=''; runCls=-1; }
+    out.push('\n');
+  }
+  el.grid.innerHTML=out.join('');
+}
+
+var BLOCKS='▁▂▃▄▅▆▇█';
+function spark(vals,max){
+  var s='';
+  for (var i=0;i<vals.length;i++){
+    var v=max>0?vals[i]/max:0;
+    if (v<=0){ s+=' '; continue; }
+    var k=Math.round(v*(BLOCKS.length-1));
+    s+=BLOCKS[k<0?0:(k>=BLOCKS.length?BLOCKS.length-1:k)];
+  }
+  return s;
+}
+function seriesFor(w,sid,n){
+  var out=[],h=w.hist,from=Math.max(0,h.length-n);
+  for (var i=from;i<h.length;i++) out.push(h[i].counts[sid]||0);
+  return out;
+}
+
+function renderSpecies(w){
+  var live=[],i;
+  for (i=0;i<w.species.length;i++) if (w.species[i].alive && w.species[i].count>0) live.push(w.species[i]);
+  live.sort(function(a,b){ return b.count-a.count; });
+  el.spCount.textContent=live.length+' live';
+  var maxC=live.length?live[0].count:1, html='';
+  for (i=0;i<live.length;i++){
+    var s=live[i];
+    var fs=(10+7*Math.sqrt(s.count/maxC)).toFixed(1);     // 字号 = 种群大小
+    html+='<div class="sp" data-sp="'+s.id+'">'+
+      '<span class="sp-g" style="color:'+s.color+';font-size:'+fs+'px">'+s.glyph+'</span>'+
+      '<span class="sp-n" style="color:'+s.color+'">'+esc(s.name)+'</span>'+
+      '<span class="sp-bar">'+spark(seriesFor(w,s.id,18),Math.max(1,s.peak))+'</span>'+
+      '<span class="sp-c">'+s.count+'</span></div>';
+  }
+  el.species.innerHTML=html||'<div class="muted" style="padding:6px 2px">no living species</div>';
+}
+
+function renderChart(w){
+  var h=w.hist,from=Math.max(0,h.length-48);
+  var P=[],H=[],X=[],max=1;
+  for (var i=from;i<h.length;i++){
+    P.push(h[i].tiers.producer); H.push(h[i].tiers.herbivore); X.push(h[i].tiers.predator);
+    max=Math.max(max,h[i].tiers.producer,h[i].tiers.herbivore,h[i].tiers.predator);
+  }
+  el.chartMax.textContent='peak '+max;
+  el.chart.innerHTML='<div class="cl-bio">'+spark(P,max)+'</div>'+
+                     '<div class="cl-herb">'+spark(H,max)+'</div>'+
+                     '<div class="cl-pred">'+spark(X,max)+'</div>';
+}
+
+function renderChronicle(w,force){
+  var c=w.chronicle;
+  if (force||app.chronDrawn>c.length){ el.chron.innerHTML=''; app.chronDrawn=0; }
+  if (app.chronDrawn===c.length) return;
+  var atBottom=el.chron.scrollTop+el.chron.clientHeight>=el.chron.scrollHeight-30;
+  var frag='';
+  for (var i=app.chronDrawn;i<c.length;i++){
+    frag+='<div class="ce k-'+c[i].k+'"><span class="ce-t">t='+c[i].t+'</span>'+
+          '<span class="ce-b">'+esc(c[i].m)+'</span></div>';
+  }
+  el.chron.insertAdjacentHTML('beforeend',frag);
+  app.chronDrawn=c.length;
+  while (el.chron.childNodes.length>280) el.chron.removeChild(el.chron.firstChild);
+  if (atBottom) el.chron.scrollTop=el.chron.scrollHeight;
+}
+
+function rep(ch,n){ var s=''; while (n-- > 0) s+=ch; return s; }
+function gauge(v,lo,hi){
+  var n=5,k=Math.round((v-lo)/(hi-lo)*n);
+  k=k<0?0:(k>n?n:k);
+  return '<i style="color:var(--fg-mid)">'+rep('▮',k)+'</i>'+rep('▯',n-k);
+}
+
+function renderStatus(w){
+  el.runname.textContent=w.label;
+  el.vTick.textContent=w.t.toLocaleString();
+  el.vPop.textContent=w.pop;
+  el.vTemp.textContent=w.env.temp.toFixed(2);
+  el.vLight.textContent=w.env.light.toFixed(2);
+  el.gTemp.innerHTML=gauge(w.env.temp,0,1.3);
+  el.gLight.innerHTML=gauge(w.env.light,0,1.4);
+  var bio=0,i;
+  for (i=0;i<w.orgs.length;i++) if (w.orgs[i]) bio+=w.orgs[i].energy;
+  var nut=0;
+  for (i=0;i<w.N;i++) nut+=w.nutrient[i];
+  el.vEnergy.textContent=Math.round(bio)+' bio / '+Math.round(nut)+' sub';
+}
+function renderLaws(w){
+  var html='';
+  for (var i=0;i<w.laws.length;i++){
+    var law=TL.getLaw(w.laws[i]);
+    html+='<span class="law" title="'+esc(law.desc)+'">'+esc(law.name)+'</span> ';
+  }
+  el.laws.innerHTML=html;
+}
+
+function renderInfluence(){
+  var p=app.influence.points,s='';
+  for (var i=0;i<CONFIG.INFLUENCE_MAX;i++) s+= i<p?'●':'<span class="off">○</span>';
+  el.influence.innerHTML=s;
+  if (p>=CONFIG.INFLUENCE_MAX){ el.infNext.textContent=''; return; }
+  var left=CONFIG.INFLUENCE_PERIOD_MS-(Date.now()-app.influence.at);
+  if (left<0) left=0;
+  var m=Math.floor(left/60000), sec=Math.floor(left/1000)%60;
+  el.infNext.textContent=' +1 in '+m+':'+(sec<10?'0':'')+sec;
+}
+
+function renderAll(w){
+  renderGrid(w); renderSpecies(w); renderChart(w);
+  renderChronicle(w); renderStatus(w); renderInfluence(); syncTools();
+}
+
+/* ============================== INFLUENCE ==============================
+   按现实时间恢复：每 6 分钟 +1，上限 10 —— 挂机粘性的来源
+   ===================================================================== */
+function regenInfluence(){
+  var inf=app.influence, now=Date.now();
+  if (inf.points>=CONFIG.INFLUENCE_MAX){ inf.at=now; return; }
+  var gained=Math.floor((now-inf.at)/CONFIG.INFLUENCE_PERIOD_MS);
+  if (gained>0){
+    inf.points=Math.min(CONFIG.INFLUENCE_MAX, inf.points+gained);
+    inf.at += gained*CONFIG.INFLUENCE_PERIOD_MS;
+    if (inf.points>=CONFIG.INFLUENCE_MAX) inf.at=now;
+  }
+}
+function canAfford(tool){ return app.influence.points >= (CONFIG.COSTS[tool]||0); }
+function spend(tool){
+  var c=CONFIG.COSTS[tool]||0;
+  if (app.influence.points<c) return false;
+  if (app.influence.points>=CONFIG.INFLUENCE_MAX) app.influence.at=Date.now();
+  app.influence.points-=c;
+  return true;
+}
+
+/* 干预的"回响"：记录干预时的种群，一段时间后回看后果 */
+var echoes=[];
+function armEcho(w,label,delay){
+  var snap={ producer:0, herbivore:0, predator:0, decomposer:0 };
+  for (var i=0;i<w.orgs.length;i++){ var o=w.orgs[i]; if(o) snap[w.species[o.sid].tier]++; }
+  echoes.push({ at:w.t+(delay||600), label:label, snap:snap });
+}
+function checkEchoes(w){
+  for (var i=echoes.length-1;i>=0;i--){
+    if (w.t < echoes[i].at) continue;
+    var e=echoes.splice(i,1)[0], now={ producer:0,herbivore:0,predator:0,decomposer:0 };
+    for (var j=0;j<w.orgs.length;j++){ var o=w.orgs[j]; if(o) now[w.species[o.sid].tier]++; }
+    var parts=[];
+    ['producer','herbivore','predator'].forEach(function(k){
+      var a=e.snap[k], b=now[k];
+      if (a<5 && b<5) return;
+      var d=b-a, pct=a>0?Math.round(d/a*100):(b>0?100:0);
+      if (Math.abs(pct)>=25) parts.push(k+' '+(d>=0?'+':'')+pct+'%');
+    });
+    TL.logEvent(w,'player','Follow-up on '+e.label+': '+
+      (parts.length?parts.join(', ')+'.':'no measurable shift in the standing census.'));
+  }
+}
+
+/* ============================== INTERVENTIONS ============================== */
+var TOOL_INFO={
+  SEED:'Place one unlocked species at the chosen cell.',
+  NUTRIENT:'Enrich a patch of substrate.',
+  WARM:'Raise temperature for a spell.',
+  COOL:'Lower temperature for a spell.',
+  CULL:'Clear every organism in a rectangle.',
+  IRRADIATE:'Multiply mutation rate by ten inside a patch.',
+  PRESERVE:'Archive a species into the Codex permanently.'
+};
+
+function applyTool(w,tool,x,y){
+  var i,j,r;
+  if (tool==='NUTRIENT'){
+    r=4;
+    for (j=-r;j<=r;j++) for (i=-r;i<=r;i++){
+      var idx=TL.at(w,x+i,y+j);
+      w.nutrient[idx]=Math.min(CONFIG.NUTRIENT_CAP*1.6, w.nutrient[idx]+50);
+    }
+    TL.logEvent(w,'player','Substrate enriched near ('+x+','+y+').');
+    armEcho(w,'nutrient enrichment',500);
+    return true;
+  }
+  if (tool==='WARM'||tool==='COOL'){
+    var d=tool==='WARM'?0.22:-0.22;
+    w.env.tempOffset=d; w.env.tempOffsetUntil=w.t+1200;
+    TL.logEvent(w,'player','Thermal forcing applied, '+(d>0?'+':'')+d.toFixed(2)+' for 1200 ticks.');
+    armEcho(w,tool.toLowerCase()+' forcing',1300);
+    return true;
+  }
+  if (tool==='CULL'){
+    r=4; var n=0;
+    for (j=-r;j<=r;j++) for (i=-r;i<=r;i++){
+      var c=w.occ[TL.at(w,x+i,y+j)];
+      if (c!==0 && w.orgs[c-1]){ TL.killOrg(w,w.orgs[c-1],'cull'); n++; }
+    }
+    TL.logEvent(w,'player','Cull executed at ('+x+','+y+'). '+n+' individuals removed.');
+    armEcho(w,'the cull at ('+x+','+y+')',600);
+    return true;
+  }
+  if (tool==='IRRADIATE'){
+    w.env.irrad.push({ x:x, y:y, r:5, until:w.t+1500 });
+    TL.logEvent(w,'player','Irradiated patch at ('+x+','+y+'). Mutation rate ×10 for 1500 ticks.');
+    armEcho(w,'the irradiated patch',1600);
+    return true;
+  }
+  if (tool==='SEED'){
+    var key=app.seedSpecies;
+    var e=app.codex[key];
+    if (!e){ toast('Select a species from the Codex first.'); return false; }
+    var sp=findOrCreateSpecies(w,e);
+    var placed=null;
+    for (var tries=0;tries<60 && !placed;tries++){
+      var px=TL.wrapX(w,x+(tries?((w.rng.int(7))-3):0));
+      var py=TL.wrapY(w,y+(tries?((w.rng.int(7))-3):0));
+      if (w.occ[py*w.W+px]===0) placed=TL.newOrg(w,sp,px,py,sp.startEnergy,null);
+    }
+    if (!placed){ toast('No open cell there.'); return false; }
+    TL.logEvent(w,'player','Introduced '+sp.name+' ('+sp.glyph+') at ('+x+','+y+').');
+    armEcho(w,'the introduction of '+sp.name,700);
+    return true;
+  }
+  return false;
+}
+
+/* 把 Codex 条目还原成本 run 中的活体物种（若已存在同名则复用） */
+function findOrCreateSpecies(w,e){
+  for (var i=0;i<w.species.length;i++){
+    if (w.species[i].name===e.name && w.species[i].alive) return w.species[i];
+  }
+  var tmpl={ tier:e.tier, diet:(TL.BASE[e.tier]||TL.BASE.producer).diet.slice(), startEnergy:e.startEnergy };
+  var g=gObj(e.tmpl);
+  for (var k=0;k<GENES.length;k++) tmpl[GENES[k]]=g[GENES[k]];
+  var sp=TL.registerSpecies(w,tmpl,w.rng,null);
+  sp.name=e.name; sp.glyph=e.glyph;
+  sp.hue=e.hue; sp.sat=e.sat; sp.lig=e.lig;
+  sp.color='hsl('+e.hue.toFixed(0)+','+e.sat.toFixed(0)+'%,'+e.lig.toFixed(0)+'%)';
+  app.lastSpeciesSig='';
+  return sp;
+}
+
+/* ============================== TOOLTIP / PICKING ============================== */
+function cellFromEvent(ev){
+  var r=el.grid.getBoundingClientRect();
+  var x=Math.floor((ev.clientX-r.left)/app.cw);
+  var y=Math.floor((ev.clientY-r.top)/app.ch);
+  var w=app.world;
+  if (!w||x<0||y<0||x>=w.W||y>=w.H) return null;
+  return { x:x, y:y, i:y*w.W+x };
+}
+
+function describeCell(w,cell){
+  var c=w.occ[cell.i];
+  var nut=w.nutrient[cell.i];
+  if (c===0||!w.orgs[c-1]){
+    return '<div class="t-h"><b>empty substrate</b></div>'+
+           '<div class="t-r"><span>nutrient</span><b>'+nut.toFixed(1)+'</b></div>'+
+           '<div class="t-r"><span>detritus</span><b>'+w.detritus[cell.i].toFixed(1)+'</b></div>'+
+           '<div class="t-r"><span>cell</span><b>'+cell.x+','+cell.y+'</b></div>';
+  }
+  var o=w.orgs[c-1], sp=w.species[o.sid], g=o.genome;
+  var lin=sp.parent>=0&&w.species[sp.parent] ? w.species[sp.parent].name : 'founding stock';
+  var maxAge=Math.round(g.lifespan*w.mods.lifespanMul);
+  return '<div class="t-h"><span style="color:'+sp.color+';font-size:15px">'+sp.glyph+'</span>'+
+      '<b style="color:'+sp.color+'">'+esc(sp.name)+'</b></div>'+
+    '<div class="t-r"><span>tier</span><b>'+sp.tier+'</b></div>'+
+    '<div class="t-r"><span>energy</span><b>'+o.energy.toFixed(1)+' / '+g.reproThreshold.toFixed(0)+'</b></div>'+
+    '<div class="t-r"><span>age</span><b>'+o.age+' / '+maxAge+'</b></div>'+
+    (g.digest?'<div class="t-r"><span>digesting</span><b>'+(o.gut>0?o.gut+'t':'ready')+'</b></div>':'')+
+    '<div class="t-r"><span>metabolism</span><b>'+g.metabolism.toFixed(3)+'</b></div>'+
+    (g.vision?'<div class="t-r"><span>vision</span><b>'+g.vision.toFixed(1)+'</b></div>':'')+
+    '<div class="t-r"><span>descends from</span><b>'+esc(lin)+'</b></div>'+
+    '<div class="t-r"><span>species age</span><b>'+(w.t-sp.bornTick)+'t</b></div>';
+}
+
+function showTip(ev,html){
+  el.tip.innerHTML=html;
+  el.tip.style.display='block';
+  var r=el.tip.getBoundingClientRect();
+  var x=ev.clientX+14, y=ev.clientY+14;
+  if (x+r.width>innerWidth-8) x=ev.clientX-r.width-14;
+  if (y+r.height>innerHeight-8) y=innerHeight-r.height-8;
+  el.tip.style.left=x+'px'; el.tip.style.top=y+'px';
+}
+function hideTip(){ el.tip.style.display='none'; }
+
+/* ============================== MODALS ============================== */
+function openModal(title,body,foot){
+  el.modal.innerHTML='<div class="modal-head"><span>'+title+'</span><span class="x" data-close>ESC</span></div>'+
+    '<div class="modal-body">'+body+'</div>'+
+    (foot?'<div class="modal-foot">'+foot+'</div>':'');
+  el.overlay.classList.add('show');
+}
+function closeModal(){ el.overlay.classList.remove('show'); }
+function toast(msg){
+  TL.logEvent(app.world,'info',msg);
+  renderChronicle(app.world);
+}
+
+function tierLabel(t){ return t.charAt(0).toUpperCase()+t.slice(1); }
+
+function openCodex(pickMode){
+  var keys=Object.keys(app.codex);
+  keys.sort(function(a,b){ return app.codex[a].name<app.codex[b].name?-1:1; });
+  var body='';
+  if (!keys.length){
+    body='<div class="muted">The Codex is empty. Species are recorded when a run ends, '+
+         'or immediately when you PRESERVE them.</div>';
+  } else {
+    body='<div class="muted" style="margin-bottom:8px">'+keys.length+' species recorded'+
+         (pickMode?' — pick one to seed.':'')+'</div><div class="cx">';
+    for (var i=0;i<keys.length;i++){
+      var e=app.codex[keys[i]];
+      var col='hsl('+e.hue.toFixed(0)+','+e.sat.toFixed(0)+'%,'+e.lig.toFixed(0)+'%)';
+      body+='<div class="cx-e'+(app.seedSpecies===keys[i]?' sel':'')+'" data-key="'+esc(keys[i])+'">'+
+        '<div class="cx-h"><span class="cx-g" style="color:'+col+'">'+e.glyph+'</span>'+
+        '<span class="cx-n">'+esc(e.name)+'</span></div>'+
+        '<div class="cx-d">'+esc(e.desc)+'</div>'+
+        '<div class="cx-m"><span>'+tierLabel(e.tier)+(e.preserved?' · preserved':'')+'</span>'+
+        '<span>peak '+e.peak+' · '+e.lived+'t</span></div>'+
+        '<div class="cx-m"><span>first seen '+esc(e.firstRun)+'</span></div></div>';
+    }
+    body+='</div>';
+  }
+  openModal('Codex', body, pickMode?'<button class="btn" data-close>Cancel</button>':'');
+}
+
+/* ============================== RUN END / REPORT ============================== */
+function runSummary(w){
+  var longest=0, longestName='—', i;
+  for (i=0;i<w.species.length;i++){
+    var s=w.species[i];
+    var lived=(s.deadTick>0?s.deadTick:w.t)-s.bornTick;
+    if (lived>longest){ longest=lived; longestName=s.name; }
+  }
+  return { ticks:w.t, peakBiomass:Math.round(w.stats.peakBiomass||0), peakPop:w.stats.peakPop||0,
+           species:w.species.length, speciations:w.stats.speciations||0,
+           extinctions:w.stats.extinctions||0, longest:longest, longestName:longestName };
+}
+
+function showRunEnd(w){
+  harvestCodex(w);
+  var s=runSummary(w);
+  var body='<div class="big">'+esc(w.endReason||'Run closed.')+'</div>'+
+    '<div class="muted" style="margin:4px 0 12px">'+esc(w.label)+'</div><div class="rule"></div>'+
+    '<div class="kv"><span>Ticks elapsed</span><b>'+s.ticks.toLocaleString()+'</b></div>'+
+    '<div class="kv"><span>Peak biomass</span><b>'+s.peakBiomass.toLocaleString()+'</b></div>'+
+    '<div class="kv"><span>Peak population</span><b>'+s.peakPop.toLocaleString()+'</b></div>'+
+    '<div class="kv"><span>Species total</span><b>'+s.species+'</b></div>'+
+    '<div class="kv"><span>Speciations</span><b>'+s.speciations+'</b></div>'+
+    '<div class="kv"><span>Extinctions</span><b>'+s.extinctions+'</b></div>'+
+    '<div class="kv"><span>Longest lineage</span><b>'+esc(s.longestName)+' ('+s.longest+'t)</b></div>'+
+    '<div class="rule"></div><div class="muted">Every species observed this run has been written to the Codex.</div>';
+  openModal('Run report', body,
+    '<button class="btn" data-act="newrun">Begin new run</button>'+
+    '<button class="btn" data-close>Keep looking</button>');
+}
+
+/* ============================== OFFLINE CATCH-UP ============================== */
+function fmtDur(ms){
+  var m=Math.floor(ms/60000), h=Math.floor(m/60);
+  m=m%60;
+  return h>0 ? h+'h '+m+'m' : m+'m';
+}
+function snapTiers(w){
+  var t={producer:0,herbivore:0,predator:0,decomposer:0};
+  for (var i=0;i<w.orgs.length;i++){ var o=w.orgs[i]; if(o) t[w.species[o.sid].tier]++; }
+  return t;
+}
+function biomassOf(w){
+  var b=0; for (var i=0;i<w.orgs.length;i++) if (w.orgs[i]) b+=w.orgs[i].energy;
+  return b;
+}
+
+/* 无渲染快速补算，分块进行以免阻塞主线程 */
+function runCatchUp(w, ticks, elapsedMs, done){
+  var before={ tiers:snapTiers(w), bio:biomassOf(w), t:w.t,
+               chron:w.chronicle.length, spec:w.stats.speciations||0, ext:w.stats.extinctions||0 };
+  el.boot.classList.add('show');
+  var did=0;
+  function chunk(){
+    var budget=Math.min(900, ticks-did);
+    for (var i=0;i<budget;i++){ TL.tick(w); if (w.ended) break; }
+    did+=budget;
+    var frac=ticks?did/ticks:1, n=Math.round(frac*34);
+    el.bootbar.textContent='['+rep('█',n)+rep('·',34-n)+']';
+    el.boottext.textContent='SIMULATING '+fmtDur(elapsedMs)+' — '+Math.round(frac*100)+'%';
+    if (did<ticks && !w.ended) setTimeout(chunk,0);
+    else { el.boot.classList.remove('show'); done(before); }
+  }
+  chunk();
+}
+
+function showFieldReport(w, before, elapsedMs){
+  var after={ tiers:snapTiers(w), bio:biomassOf(w) };
+  var spec=(w.stats.speciations||0)-before.spec;
+  var ext=(w.stats.extinctions||0)-before.ext;
+  var bioPct=before.bio>0?Math.round((after.bio-before.bio)/before.bio*100):0;
+
+  var rows='';
+  ['producer','herbivore','predator','decomposer'].forEach(function(k){
+    var a=before.tiers[k], b=after.tiers[k], d=b-a;
+    rows+='<div class="kv"><span style="color:'+
+      (k==='producer'?'var(--producer)':k==='herbivore'?'var(--herbivore)':
+       k==='predator'?'var(--predator)':'var(--decomposer)')+'">'+k+'</span>'+
+      '<b>'+a+' → '+b+' <span class="muted">('+(d>=0?'+':'')+d+')</span></b></div>';
+  });
+
+  var bits=[];
+  if (spec) bits.push(spec+' speciation'+(spec>1?'s':''));
+  if (ext) bits.push(ext+' extinction'+(ext>1?'s':''));
+  bits.push('biomass '+(bioPct>=0?'+':'')+bioPct+'%');
+  var summary='While you were away: '+bits.join(', ')+'.';
+
+  var newEvents=w.chronicle.slice(before.chron), keep=[];
+  for (var i=0;i<newEvents.length;i++){
+    var k=newEvents[i].k;
+    if (k==='spec'||k==='ext'||k==='major'||k==='dom'||k==='crash'||k==='boom') keep.push(newEvents[i]);
+  }
+  keep=keep.slice(-14);
+  var log='';
+  for (var j=0;j<keep.length;j++){
+    log+='<div class="ce k-'+keep[j].k+'"><span class="ce-t">t='+keep[j].t+'</span>'+
+         '<span class="ce-b">'+esc(keep[j].m)+'</span></div>';
+  }
+  if (!log) log='<div class="muted">Nothing of note was recorded.</div>';
+
+  openModal('Field report',
+    '<div class="big">'+esc(summary)+'</div>'+
+    '<div class="muted" style="margin:4px 0 10px">'+fmtDur(elapsedMs)+' away · '+
+      (w.t-before.t).toLocaleString()+' ticks simulated · now t='+w.t.toLocaleString()+'</div>'+
+    '<div class="rule"></div>'+rows+
+    '<div class="rule"></div><div class="muted" style="margin-bottom:5px">Selected entries</div>'+log,
+    '<button class="btn" data-close>Resume observation</button>');
+}
+
+/* ============================== LOOP ============================== */
+var acc=0, lastT=performance.now(), lastRender=0, lastSave=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  var w=app.world; if (!w) return;
+  var dt=Math.min(250, now-lastT); lastT=now;
+
+  if (!app.paused && !w.ended){
+    acc += dt/1000*CONFIG.TICK_RATE*app.speed;
+    var budget=acc|0;
+    if (budget>60) budget=60;              // 单帧上限，避免卡顿滚雪球
+    acc-=budget;
+    for (var i=0;i<budget;i++){ TL.tick(w); if (w.ended) break; }
+    if (budget) checkEchoes(w);
+  }
+  if (now-lastRender > 1000/CONFIG.RENDER_FPS){
+    lastRender=now;
+    regenInfluence();
+    renderAll(w);
+    if (w.ended && !w._reported){ w._reported=true; showRunEnd(w); }
+  }
+  if (now-lastSave > 12000){ lastSave=now; save(); }
+}
+
+/* ============================== UI ============================== */
+function syncTools(){
+  var btns=document.querySelectorAll('[data-tool]');
+  for (var i=0;i<btns.length;i++){
+    var t=btns[i].dataset.tool;
+    btns[i].classList.toggle('on', app.tool===t);
+    btns[i].disabled=!canAfford(t);
+  }
+}
+function syncSpeedButtons(){
+  var sb=document.querySelectorAll('[data-speed]');
+  for (var i=0;i<sb.length;i++)
+    sb[i].classList.toggle('on', +sb[i].dataset.speed===(app.paused?0:app.speed));
+}
+function selectTool(t){
+  app.tool=(app.tool===t)?null:t;
+  if (app.tool==='SEED' && !app.seedSpecies) openCodex(true);
+  else if (app.tool==='PRESERVE') toast('PRESERVE armed. Click an organism to archive its species.');
+  else if (app.tool) toast(t+' armed. '+TOOL_INFO[t]);
+  syncTools();
+}
+function doPreserve(w,cell){
+  var c=w.occ[cell.i];
+  if (c===0||!w.orgs[c-1]){ toast('Nothing there to preserve.'); return false; }
+  var sp=w.species[w.orgs[c-1].sid];
+  recordCodex(sp,w,true);
+  TL.logEvent(w,'player',sp.name+' preserved to the Codex. It will outlast this run.');
+  return true;
+}
+function onGridClick(ev){
+  var w=app.world, cell=cellFromEvent(ev);
+  if (!w||!cell) return;
+  if (!app.tool){ showTip(ev, describeCell(w,cell)); return; }
+  var tool=app.tool;
+  if (!canAfford(tool)){ toast('Not enough influence for '+tool+'.'); return; }
+  var ok=(tool==='PRESERVE')?doPreserve(w,cell):applyTool(w,tool,cell.x,cell.y);
+  if (ok){ spend(tool); app.tool=null; renderChronicle(w); renderInfluence(); syncTools(); }
+}
+
+function showSpeciesModal(sid){
+  var w=app.world, sp=w.species[sid]; if(!sp) return;
+  var g=sp.tmpl, rows='';
+  for (var i=0;i<GENES.length;i++){
+    var k=GENES[i];
+    if (!g[k]) continue;
+    rows+='<div class="kv"><span>'+k+'</span><b>'+(+g[k]).toFixed(3)+'</b></div>';
+  }
+  var parent=(sp.parent>=0&&w.species[sp.parent])?w.species[sp.parent].name:'founding stock';
+  openModal('Species',
+    '<div class="big"><span style="color:'+sp.color+'">'+sp.glyph+'</span> '+esc(sp.name)+'</div>'+
+    '<div class="muted" style="margin:3px 0 10px">'+tierLabel(sp.tier)+' · '+esc(TL.describeSpecies(sp))+'</div>'+
+    '<div class="rule"></div>'+
+    '<div class="kv"><span>Population</span><b>'+sp.count+'</b></div>'+
+    '<div class="kv"><span>Peak</span><b>'+sp.peak+'</b></div>'+
+    '<div class="kv"><span>Arose at</span><b>t='+sp.bornTick+'</b></div>'+
+    '<div class="kv"><span>Descends from</span><b>'+esc(parent)+'</b></div>'+
+    '<div class="rule"></div>'+rows,
+    '<button class="btn" data-close>Close</button>');
+}
+
+function bindUI(){
+  el.grid.addEventListener('mousemove', function(ev){
+    var w=app.world, cell=cellFromEvent(ev);
+    if (!w||!cell){ hideTip(); el.cursor.style.display='none'; return; }
+    el.cursor.style.display='block';
+    el.cursor.style.left=(cell.x*app.cw)+'px';
+    el.cursor.style.top=(cell.y*app.ch)+'px';
+    showTip(ev, describeCell(w,cell));
+  });
+  el.grid.addEventListener('mouseleave', function(){ hideTip(); el.cursor.style.display='none'; });
+  el.grid.addEventListener('click', onGridClick);
+
+  document.addEventListener('click', function(ev){
+    var t=ev.target.closest?ev.target.closest('[data-tool],[data-speed],[data-close],[data-act],[data-key],[data-sp]'):null;
+    if (!t) return;
+    if (t.dataset.tool!==undefined){ selectTool(t.dataset.tool); return; }
+    if (t.dataset.speed!==undefined){
+      var v=+t.dataset.speed;
+      app.paused=(v===0);
+      if (v>0) app.speed=v;
+      syncSpeedButtons();
+      return;
+    }
+    if (t.dataset.close!==undefined){ closeModal(); return; }
+    if (t.dataset.key!==undefined){
+      app.seedSpecies=t.dataset.key;
+      closeModal(); app.tool='SEED'; syncTools();
+      toast('Seeding '+app.codex[app.seedSpecies].name+'. Click a cell to place it.');
+      return;
+    }
+    if (t.dataset.sp!==undefined){ showSpeciesModal(+t.dataset.sp); return; }
+    if (t.dataset.act==='newrun'){ closeModal(); newRun(); return; }
+    if (t.dataset.act==='archive'){ closeModal(); archiveRun(); return; }
+  });
+
+  $('#b-codex').addEventListener('click', function(){ openCodex(false); });
+  $('#b-archive').addEventListener('click', function(){
+    openModal('Archive run',
+      '<div>Close this world, write every species observed into the Codex, and open a fresh run with new physics?</div>'+
+      '<div class="muted" style="margin-top:8px">The current world cannot be recovered.</div>',
+      '<button class="btn" data-act="archive">Archive and restart</button><button class="btn" data-close>Cancel</button>');
+  });
+
+  el.overlay.addEventListener('click', function(ev){ if (ev.target===el.overlay) closeModal(); });
+  document.addEventListener('keydown', function(ev){
+    if (ev.key==='Escape'){ closeModal(); app.tool=null; syncTools(); }
+    else if (ev.key===' '){ ev.preventDefault(); app.paused=!app.paused; syncSpeedButtons(); }
+  });
+
+  var tabs=document.querySelectorAll('#tabs button');
+  for (var i=0;i<tabs.length;i++){
+    tabs[i].addEventListener('click', function(ev){
+      document.body.className='tab-'+ev.currentTarget.dataset.tab;
+      for (var j=0;j<tabs.length;j++) tabs[j].classList.toggle('on', tabs[j]===ev.currentTarget);
+      fitGrid();
+    });
+  }
+  var rt;
+  window.addEventListener('resize', function(){ clearTimeout(rt); rt=setTimeout(fitGrid,120); });
+  window.addEventListener('beforeunload', save);
+  document.addEventListener('visibilitychange', function(){ if (document.hidden) save(); });
+}
+
+/* ============================== BOOT ============================== */
+function freshWorld(){ return TL.createWorld((Math.random()*0x7fffffff)|0); }
+function attach(w){
+  app.world=w; app.chronDrawn=0; app.lastSpeciesSig=''; echoes.length=0;
+  el.chron.innerHTML='';
+  renderLaws(w); fitGrid(); renderAll(w); syncSpeedButtons();
+}
+function newRun(){
+  if (app.world) harvestCodex(app.world);
+  attach(freshWorld()); save();
+}
+function archiveRun(){
+  if (app.world){ harvestCodex(app.world); TL.logEvent(app.world,'major','Run archived by observer.'); }
+  newRun();
+}
+
+function boot(){
+  loadCodex();
+  bindUI();
+  var d=loadSave(), w=null;
+  if (d){ try { w=deserialize(d); } catch(e){ w=null; } }
+  if (!w || !w.species.length){
+    attach(freshWorld()); save(); requestAnimationFrame(loop); return;
+  }
+  attach(w);
+  regenInfluence();
+
+  /* 离线推进：真实秒数 → tick，上限 8 小时 */
+  var elapsed=Math.max(0, Date.now()-(d.ts||Date.now()));
+  var useMs=Math.min(elapsed, CONFIG.OFFLINE_CAP_HOURS*3600*1000);
+  var ticks=Math.floor(useMs/1000*CONFIG.OFFLINE_TICKS_PER_SEC);
+  if (ticks>40 && !w.ended){
+    runCatchUp(w, ticks, useMs, function(before){
+      renderAll(w); showFieldReport(w, before, useMs); save();
+    });
+  }
+  requestAnimationFrame(loop);
+}
+
+if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot);
+else boot();
+
+})();
+</script>
+</body>
+</html>
